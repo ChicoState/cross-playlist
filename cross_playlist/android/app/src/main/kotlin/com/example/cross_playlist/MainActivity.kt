@@ -1,0 +1,5 @@
+package com.example.cross_playlist
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity : FlutterActivity()
