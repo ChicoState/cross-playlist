@@ -1,0 +1,22 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Default: deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    // User documents
+    match /users/{userId} {
+      // Users can read/write their own user document
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Private subcollection (includes Spotify tokens)
+      match /private/{document=**} {
+        // Only the user can access their private data
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+  }
+}
