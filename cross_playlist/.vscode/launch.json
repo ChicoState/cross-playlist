@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Cross-Playlist Web",
+      "type": "dart",
+      "request": "launch",
+      "program": "lib/main.dart",
+      "args": [
+        "-d", "chrome",
+        "--web-port=8888",
+        "--web-hostname=127.0.0.1"
+      ]
+    }
+  ]
+}
