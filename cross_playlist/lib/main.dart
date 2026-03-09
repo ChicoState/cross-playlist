@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -97,12 +99,23 @@ class Playlist extends StatefulWidget {
 
 class _PlaylistState extends State<Playlist> {
   
-  final List<Song> songList = List<Song>.generate(2, (int index) => Song("", "", "", "", name: "", url: "") ,growable: true);
+  final List<Song> songList = List<Song>.generate(1, (int index) => Song("none", "N/A", "", "", name: "test default", url: "") ,growable: true);
   void _addSong() {
     setState(() {
       // Need to add user input to fill the song information
       String artist = 'artist', album = 'album', genre = '', streamingPlatform = '', name = 'Test Name', url = 'test.com';
       songList.add(Song(artist, album, genre, streamingPlatform, name: name, url: url));
+    });
+  }
+  void _deleteSong(int songIndex) {
+    setState(() {
+    songList.removeAt(songIndex);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DeleteAction(songList, songIndex),
+        )
+      );
     });
   }
 
@@ -113,6 +126,7 @@ class _PlaylistState extends State<Playlist> {
       padding: const EdgeInsets.symmetric(horizontal: 20),
       onReorder: (int oldIndex, int newIndex){
         setState(() {
+          
           if (oldIndex < newIndex) {
             newIndex -= 1;
           }
@@ -151,7 +165,7 @@ class _PlaylistState extends State<Playlist> {
                 border: Border.all(color: Colors.black, width: 2)
               ),
               child: Center(
-                child: Text('songList[index].name \nsongList[index].artist \nsongList[index].album'),
+                child: Text('Song: ${songList[index].name} \nArtist: ${songList[index].artist} \nAlbum: ${songList[index].album}'),
               ),
             ),
 
@@ -162,10 +176,12 @@ class _PlaylistState extends State<Playlist> {
               child: Row(
                 children: [ 
                   FloatingActionButton(
+                  heroTag: 'tag$index',
                   onPressed: () => songList[index]._stream('play'),
                   tooltip: "Plays/Pauses music",
                   child: const Icon(Icons.play_arrow, size: 40, color: Colors.green)),
                   FloatingActionButton(
+                  heroTag: 'tag${index+songList.length+2}',
                   onPressed: () => songList[index]._stream('stop'),
                   tooltip: "Stops music",
                   child: const Icon(Icons.stop, size: 40, color: Colors.red,),
@@ -173,9 +189,84 @@ class _PlaylistState extends State<Playlist> {
                 ],
               ),
             ),
+            onLongPress: () => _deleteSong(index),
           ),
         ],
     );
   }
 }
 
+
+
+
+class DeleteAction extends StatelessWidget {
+  const DeleteAction(this.newList, this.index ,{super.key});
+
+
+  final List<Song> newList;
+  final int index;
+
+  void deleteSong() {
+    newList.removeAt(index);
+  }
+  @override
+  Widget build(BuildContext context) {
+    return  AlertDialog( 
+      title: Text("Remove song from playlist?"),
+      actions: [
+        FloatingActionButton(
+          heroTag: "Delete",
+          child: Text("Delete"),
+          onPressed: () => {
+            deleteSong(),
+            Navigator.of(context).pop(),ListTile()}),
+    
+        FloatingActionButton(
+          heroTag: "Cancel",
+          child: Text("Cancel"),
+          onPressed: () {Navigator.of(context).pop(false);}),
+      ],
+    );
+  }
+} 
+
+
+
+
+
+// class DeleteAction extends StatefulWidget {
+//   const DeleteAction(this.newList, this.index ,{super.key});
+
+
+//   final List<Song> newList;
+//   final int index;
+//   @override
+//   State<DeleteAction> createState() => _DeleteActionState();
+// }
+
+// class _DeleteActionState extends State<DeleteAction> {
+  
+//   void _removeSong(List<Song> newlist, int index) {
+//     newlist.removeAt(index);
+//   }
+
+//   @override
+//   Widget build(BuildContext context) {
+//     return  AlertDialog( 
+//       title: Text("Remove song ${widget.newList[widget.index].name} from playlist?"),
+//       actions: [
+//         FloatingActionButton(
+//           heroTag: "Delete",
+//           child: Text("Delete"),
+//           onPressed: () => {
+//             _removeSong(widget.newList, widget.index),
+//             Navigator.of(context).pop(),ListTile()}),
+    
+//         FloatingActionButton(
+//           heroTag: "Cancel",
+//           child: Text("Cancel"),
+//           onPressed: () {Navigator.of(context).pop();}),
+//       ],
+//     );
+//   }
+// } 
