@@ -13,6 +13,7 @@ class SpotifyTrack {
   final String album;
   final String? imageUrl;
   final String spotifyUrl;
+  final String? previewUrl; // 30-second MP3 preview
 
   const SpotifyTrack({
     required this.id,
@@ -21,6 +22,7 @@ class SpotifyTrack {
     required this.album,
     this.imageUrl,
     required this.spotifyUrl,
+    this.previewUrl,
   });
 
   factory SpotifyTrack.fromJson(Map<String, dynamic> json) {
@@ -40,6 +42,7 @@ class SpotifyTrack {
 
     final externalUrls = json['external_urls'] as Map<String, dynamic>?;
     final spotifyUrl = externalUrls?['spotify'] as String? ?? '';
+    final previewUrl = json['preview_url'] as String?;
 
     return SpotifyTrack(
       id: json['id'] as String,
@@ -48,6 +51,7 @@ class SpotifyTrack {
       album: albumName,
       imageUrl: imageUrl,
       spotifyUrl: spotifyUrl,
+      previewUrl: previewUrl,
     );
   }
 }

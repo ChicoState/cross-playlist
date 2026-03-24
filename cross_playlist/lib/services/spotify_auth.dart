@@ -20,6 +20,9 @@ class SpotifyAuth {
     'playlist-modify-private',
     'user-read-email',
     'user-read-private',
+    'streaming',
+    'user-read-playback-state',
+    'user-modify-playback-state',
   ];
 
   // In-memory cache

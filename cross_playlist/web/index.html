@@ -31,6 +31,13 @@
 
   <title>cross_playlist</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- Required by Spotify SDK: must be defined before the script loads -->
+  <script>
+    window.onSpotifyWebPlaybackSDKReady = function() {};
+  </script>
+  <!-- Spotify Web Playback SDK -->
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
 </head>
 <body>
   <!--
