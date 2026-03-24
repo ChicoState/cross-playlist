@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -149,6 +151,12 @@ class _PlaylistState extends State<Playlist> {
     });
   }
 
+  void _deleteSong(int index) {
+    setState(() {
+      songList.removeAt(index);
+    });
+  }
+
   /// Opens a search dialog to find songs on Spotify and add them.
   Future<void> _showSpotifySearchDialog() async {
     final song = await showDialog<Song>(
@@ -179,7 +187,7 @@ class _PlaylistState extends State<Playlist> {
           songList.insert(newIndex, switchedSong);
         });
       },
-      footer: Padding(
+      header: Padding(
         padding: const EdgeInsets.all(16),
         child: FloatingActionButton.extended(
           onPressed: widget.spotifyConnected
@@ -200,6 +208,7 @@ class _PlaylistState extends State<Playlist> {
             key: Key('$index'),
             song: songList[index],
             index: index,
+            onLongPress: () => _deleteSong(index),
           ),
       ],
     );
@@ -342,10 +351,12 @@ class SongTile extends StatefulWidget {
     super.key,
     required this.song,
     required this.index,
+    this.onLongPress
   });
-
+  final VoidCallback? onLongPress;
   final Song song;
   final int index;
+
 
   @override
   State<SongTile> createState() => _SongTileState();
@@ -448,6 +459,7 @@ class _SongTileState extends State<SongTile> {
     }
   }
 
+
   @override
   Widget build(BuildContext context) {
     final hasFullPlayback = SpotifyPlayer.instance.isReady && _getTrackUri() != null;
@@ -509,6 +521,8 @@ class _SongTileState extends State<SongTile> {
           ),
         ),
       ),
+      onLongPress: widget.onLongPress,
+      
     );
   }
 }
