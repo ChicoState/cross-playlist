@@ -433,7 +433,8 @@ class _PlaylistState extends State<Playlist> {
                      });
                    },
           header: Padding(
-            padding: const EdgeInsets.only(right: 300),
+            padding: const EdgeInsets.only(bottom: 20),
+            child: Center(
               child: FloatingActionButton.extended(
                 onPressed: widget.spotifyConnected
                     ? _showSpotifySearchDialog
@@ -446,6 +447,7 @@ class _PlaylistState extends State<Playlist> {
                 backgroundColor:
                     widget.spotifyConnected ? const Color(0xFF1DB954) : null,
                 ),
+            ),
             ),
          children: <Widget>[
            for (int index = 0; index < songList.length; index += 1)
@@ -724,9 +726,14 @@ class _SongTileState extends State<SongTile> {
              spacing: 5,
              mainAxisSize: MainAxisSize.min,
              children: <Widget>[
-                GestureDetector(
-                  onTap: _openInSpotify,
-                  child: Container(
+                SizedBox(
+                  width: 30,
+                  child: Text(
+                    '${widget.index + 1}',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Container(
                     width: 70,
                     height: 70,
                     decoration: BoxDecoration(
@@ -736,11 +743,8 @@ class _SongTileState extends State<SongTile> {
                     child: widget.song.imageUrl != null
                       ? Image.network(widget.song.imageUrl!, fit: BoxFit.cover)
                       : const Center(child: Text("Album\nCover")),
-                  ),
                 ),
                 Flexible(
-                  child: GestureDetector(
-                  onTap: _openInSpotify,
                   child: Container(
                     width: 450,
                     height: 70,
@@ -749,15 +753,13 @@ class _SongTileState extends State<SongTile> {
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        '${widget.song.name}\n${widget.song.artist}\n${widget.song.album}'
-                        '${hasFullPlayback ? '\n(Full playback)' : widget.song.previewUrl != null ? '\n(30s preview)' : '\n(No preview)'}',
+                        '${widget.song.name}\n${widget.song.artist}\n${widget.song.album}',
                         textAlign: TextAlign.justify,
                         style: const TextStyle(fontSize: 14),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ),
-               ),
               ),
                SizedBox(
                   width: 56,
