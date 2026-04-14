@@ -71,7 +71,6 @@ class SpotifyAuth {
       'scope': _scopes.join(' '),
       'code_challenge_method': 'S256',
       'code_challenge': challenge,
-      'show_dialog': 'true',
     });
 
     html.window.location.assign(authUrl.toString());

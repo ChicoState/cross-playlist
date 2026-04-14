@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:html' as html;
 import 'firebase_options.dart';
 import 'login_page.dart';
+import 'services/playlist_service.dart';
 import 'services/spotify_auth.dart';
 import 'services/spotify_api.dart';
 import 'services/spotify_player.dart';
@@ -19,9 +20,6 @@ void main() async {
 
   // Handle Spotify OAuth redirect (needs Firebase for Firestore token save)
   await SpotifyAuth.handleRedirect();
-
-  // Load saved Spotify tokens from Firestore if user is already logged in
-  await SpotifyAuth.loadTokens();
 
   runApp(const MyApp());
 }
@@ -64,14 +62,26 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   bool _spotifyConnected = false;
   bool _playerInitialized = false;
+  List<PlaylistMeta> _playlists = [];
+  String? _selectedPlaylistId;
+  String _selectedPlaylistName = 'My Playlist';
+  bool _loadingPlaylists = true;
 
   @override
   void initState() {
     super.initState();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    // Load Spotify tokens now that the user is authenticated
+    await SpotifyAuth.loadTokens();
     _spotifyConnected = SpotifyAuth.isConnected;
     if (_spotifyConnected) {
       _initializePlayer();
     }
+    await _loadPlaylists();
+    if (mounted) setState(() {});
   }
 
   Future<void> _initializePlayer() async {
@@ -81,8 +91,23 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
+  Future<void> _loadPlaylists() async {
+    try {
+      _playlists = await PlaylistService.getPlaylists();
+      if (_playlists.isEmpty) {
+        final p = await PlaylistService.createPlaylist('My Playlist');
+        _playlists = [p];
+      }
+      _selectedPlaylistId ??= _playlists.first.id;
+      _selectedPlaylistName =
+          _playlists.firstWhere((p) => p.id == _selectedPlaylistId).name;
+    } catch (e) {
+      debugPrint('Error loading playlists: $e');
+    }
+    _loadingPlaylists = false;
+  }
+
   void _connectSpotify() {
-    // Just redirect - when we come back, initState will check isConnected
     SpotifyAuth.login();
   }
 
@@ -91,11 +116,100 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() => _spotifyConnected = false);
   }
 
+  Future<void> _createPlaylist() async {
+    final name = await _showTextDialog('New Playlist', 'Enter playlist name');
+    if (name == null || name.trim().isEmpty) return;
+    final p = await PlaylistService.createPlaylist(name.trim());
+    setState(() {
+      _playlists.add(p);
+      _selectedPlaylistId = p.id;
+      _selectedPlaylistName = p.name;
+    });
+  }
+
+  Future<void> _renamePlaylist(PlaylistMeta playlist) async {
+    final name = await _showTextDialog('Rename Playlist', 'Enter new name',
+        initialValue: playlist.name);
+    if (name == null || name.trim().isEmpty) return;
+    await PlaylistService.renamePlaylist(playlist.id, name.trim());
+    setState(() {
+      final idx = _playlists.indexWhere((p) => p.id == playlist.id);
+      if (idx >= 0) {
+        _playlists[idx] = PlaylistMeta(id: playlist.id, name: name.trim());
+        if (_selectedPlaylistId == playlist.id) {
+          _selectedPlaylistName = name.trim();
+        }
+      }
+    });
+  }
+
+  Future<void> _deletePlaylist(PlaylistMeta playlist) async {
+    if (_playlists.length <= 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot delete the last playlist')),
+      );
+      return;
+    }
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Playlist'),
+        content: Text('Delete "${playlist.name}"? This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child:
+                  const Text('Delete', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    await PlaylistService.deletePlaylist(playlist.id);
+    setState(() {
+      _playlists.removeWhere((p) => p.id == playlist.id);
+      if (_selectedPlaylistId == playlist.id) {
+        _selectedPlaylistId = _playlists.first.id;
+        _selectedPlaylistName = _playlists.first.name;
+      }
+    });
+  }
+
+  Future<String?> _showTextDialog(String title, String hint,
+      {String? initialValue}) {
+    final controller = TextEditingController(text: initialValue);
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          decoration: InputDecoration(
+              hintText: hint, border: const OutlineInputBorder()),
+          autofocus: true,
+          onSubmitted: (_) => Navigator.pop(ctx, controller.text),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, controller.text),
+              child: const Text('OK')),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Cross-Playlist', style: TextStyle(fontSize: 36)),
+        title: const Text('Cross-Playlist',
+            style: TextStyle(fontSize: 36)),
+        automaticallyImplyLeading: false,
         actions: [
           if (_spotifyConnected)
             TextButton.icon(
@@ -117,7 +231,73 @@ class _MyHomePageState extends State<MyHomePage> {
           const SizedBox(width: 8),
         ],
       ),
-      body: Playlist(spotifyConnected: _spotifyConnected),
+      body: Row(
+        children: [
+          SizedBox(
+            width: 250,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text('Playlists',
+                      style: Theme.of(context).textTheme.headlineSmall),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _playlists.length,
+                    itemBuilder: (context, index) {
+                      final p = _playlists[index];
+                      return ListTile(
+                        title: Text(p.name),
+                        selected: p.id == _selectedPlaylistId,
+                        onTap: () {
+                          setState(() {
+                            _selectedPlaylistId = p.id;
+                            _selectedPlaylistName = p.name;
+                          });
+                        },
+                        trailing: PopupMenuButton<String>(
+                          onSelected: (value) {
+                            if (value == 'rename') _renamePlaylist(p);
+                            if (value == 'delete') _deletePlaylist(p);
+                          },
+                          itemBuilder: (_) => [
+                            const PopupMenuItem(
+                                value: 'rename', child: Text('Rename')),
+                            const PopupMenuItem(
+                                value: 'delete', child: Text('Delete')),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.add),
+                  title: const Text('New Playlist'),
+                  onTap: _createPlaylist,
+                ),
+              ],
+            ),
+          ),
+          const VerticalDivider(width: 1),
+          Expanded(
+            child: _loadingPlaylists
+                ? const Center(child: CircularProgressIndicator())
+                : _selectedPlaylistId != null
+                    ? Playlist(
+                        key: ValueKey(_selectedPlaylistId),
+                        spotifyConnected: _spotifyConnected,
+                        playlistId: _selectedPlaylistId!,
+                        playlistName: _selectedPlaylistName,
+                      )
+                    : const Center(child: Text('No playlist selected')),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -130,13 +310,41 @@ class Song {
   final String name, url, artist, album, genre, streamingPlatform;
   final String? imageUrl;
   final String? previewUrl; // 30-second preview MP3
+
+  Map<String, dynamic> toMap() => {
+        'name': name,
+        'artist': artist,
+        'album': album,
+        'genre': genre,
+        'streamingPlatform': streamingPlatform,
+        'url': url,
+        'imageUrl': imageUrl,
+        'previewUrl': previewUrl,
+      };
+
+  factory Song.fromMap(Map<String, dynamic> map) => Song(
+        map['artist'] as String? ?? '',
+        map['album'] as String? ?? '',
+        map['genre'] as String? ?? '',
+        map['streamingPlatform'] as String? ?? '',
+        name: map['name'] as String? ?? '',
+        url: map['url'] as String? ?? '',
+        imageUrl: map['imageUrl'] as String?,
+        previewUrl: map['previewUrl'] as String?,
+      );
 }
 
 // Refreshes Playlist state on adding a song to the playlist
 class Playlist extends StatefulWidget {
-  const Playlist({super.key, required this.spotifyConnected});
+  const Playlist(
+      {super.key,
+      required this.spotifyConnected,
+      required this.playlistId,
+      required this.playlistName});
 
   final bool spotifyConnected;
+  final String playlistId;
+  final String playlistName;
 
   @override
   State<Playlist> createState() => _PlaylistState();
@@ -144,17 +352,50 @@ class Playlist extends StatefulWidget {
 
 class _PlaylistState extends State<Playlist> {
   final List<Song> songList = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSongs();
+  }
+
+  Future<void> _loadSongs() async {
+    try {
+      final maps = await PlaylistService.getSongs(widget.playlistId);
+      songList.clear();
+      for (final m in maps) {
+        songList.add(Song.fromMap(m));
+      }
+    } catch (e) {
+      debugPrint('Error loading songs: $e');
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _saveSongs() async {
+    try {
+      await PlaylistService.saveSongs(
+        widget.playlistId,
+        songList.map((s) => s.toMap()).toList(),
+      );
+    } catch (e) {
+      debugPrint('Error saving songs: $e');
+    }
+  }
 
   void _addSong(Song song) {
     setState(() {
       songList.add(song);
     });
+    _saveSongs();
   }
 
   void _deleteSong(int index) {
     setState(() {
       songList.removeAt(index);
     });
+    _saveSongs();
   }
 
   /// Opens a search dialog to find songs on Spotify and add them.
@@ -178,6 +419,9 @@ class _PlaylistState extends State<Playlist> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
     return ReorderableListView(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       onReorder: (int oldIndex, int newIndex) {
@@ -186,10 +430,16 @@ class _PlaylistState extends State<Playlist> {
           final switchedSong = songList.removeAt(oldIndex);
           songList.insert(newIndex, switchedSong);
         });
+        _saveSongs();
       },
       header: Padding(
         padding: const EdgeInsets.all(16),
-        child: FloatingActionButton.extended(
+        child: Column(
+          children: [
+            Text(widget.playlistName,
+                style: Theme.of(context).textTheme.headlineMedium),
+            const SizedBox(height: 12),
+            FloatingActionButton.extended(
           onPressed: widget.spotifyConnected
               ? _showSpotifySearchDialog
               : _addManualSong,
@@ -200,6 +450,8 @@ class _PlaylistState extends State<Playlist> {
           label: Text(widget.spotifyConnected ? 'Search Spotify' : 'Add Song'),
           backgroundColor:
               widget.spotifyConnected ? const Color(0xFF1DB954) : null,
+        ),
+          ],
         ),
       ),
       children: <Widget>[
@@ -464,14 +716,17 @@ class _SongTileState extends State<SongTile> {
   Widget build(BuildContext context) {
     final hasFullPlayback = SpotifyPlayer.instance.isReady && _getTrackUri() != null;
     
-    return ListTile(
-      shape: Border.all(width: 3, color: Colors.white),
-      key: Key('${widget.index}'),
-      tileColor: Colors.lightBlue,
-      contentPadding: const EdgeInsets.symmetric(vertical: 30, horizontal: 80),
-      leading: GestureDetector(
-        onTap: _openInSpotify,
-        child: Container(
+    return GestureDetector(
+      onLongPress: widget.onLongPress,
+      child: ListTile(
+        shape: Border.all(width: 3, color: Colors.white),
+        key: Key('${widget.index}'),
+        tileColor: Colors.lightBlue,
+        hoverColor: Colors.lightBlue,
+        splashColor: Colors.transparent,
+        mouseCursor: SystemMouseCursors.basic,
+        contentPadding: const EdgeInsets.symmetric(vertical: 30, horizontal: 80),
+      leading: Container(
           width: 100,
           height: 100,
           decoration: BoxDecoration(
@@ -480,11 +735,8 @@ class _SongTileState extends State<SongTile> {
           child: widget.song.imageUrl != null
               ? Image.network(widget.song.imageUrl!, fit: BoxFit.cover)
               : const Center(child: Text("Album\nCover")),
-        ),
       ),
-      title: GestureDetector(
-        onTap: _openInSpotify,
-        child: Container(
+      title: Container(
           width: 80,
           height: 90,
           decoration: BoxDecoration(
@@ -498,7 +750,6 @@ class _SongTileState extends State<SongTile> {
               style: const TextStyle(fontSize: 11),
             ),
           ),
-        ),
       ),
       trailing: SizedBox(
         width: 56,
@@ -521,8 +772,9 @@ class _SongTileState extends State<SongTile> {
           ),
         ),
       ),
-      onLongPress: widget.onLongPress,
+      onLongPress: null,
       
+    ),
     );
   }
 }
