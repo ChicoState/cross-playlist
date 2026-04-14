@@ -1,6 +1,6 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:html' as html;
@@ -13,6 +13,7 @@ import 'services/spotify_player.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
@@ -419,51 +420,45 @@ class _PlaylistState extends State<Playlist> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    return ReorderableListView(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      onReorder: (int oldIndex, int newIndex) {
-        setState(() {
-          if (oldIndex < newIndex) newIndex -= 1;
-          final switchedSong = songList.removeAt(oldIndex);
-          songList.insert(newIndex, switchedSong);
-        });
-        _saveSongs();
-      },
-      header: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Text(widget.playlistName,
-                style: Theme.of(context).textTheme.headlineMedium),
-            const SizedBox(height: 12),
-            FloatingActionButton.extended(
-          onPressed: widget.spotifyConnected
-              ? _showSpotifySearchDialog
-              : _addManualSong,
-          tooltip: widget.spotifyConnected
-              ? 'Search Spotify for a song'
-              : 'Add a song (connect Spotify to search)',
-          icon: Icon(widget.spotifyConnected ? Icons.search : Icons.add),
-          label: Text(widget.spotifyConnected ? 'Search Spotify' : 'Add Song'),
-          backgroundColor:
-              widget.spotifyConnected ? const Color(0xFF1DB954) : null,
-        ),
-          ],
-        ),
-      ),
-      children: <Widget>[
-        for (int index = 0; index < songList.length; index += 1)
-          SongTile(
-            key: Key('$index'),
-            song: songList[index],
-            index: index,
-            onLongPress: () => _deleteSong(index),
-          ),
-      ],
-    );
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: 800),
+        child:ReorderableListView(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          onReorder: (int oldIndex, int newIndex) {
+                     setState(() {
+                       if (oldIndex < newIndex) newIndex -= 1;
+                       final switchedSong = songList.removeAt(oldIndex);
+                       songList.insert(newIndex, switchedSong);
+                     });
+                   },
+          header: Padding(
+            padding: const EdgeInsets.only(right: 300),
+              child: FloatingActionButton.extended(
+                onPressed: widget.spotifyConnected
+                    ? _showSpotifySearchDialog
+                    : _addManualSong,
+                tooltip: widget.spotifyConnected
+                    ? 'Search Spotify for a song'
+                    : 'Add a song (connect Spotify to search)',
+                icon: Icon(widget.spotifyConnected ? Icons.search : Icons.add),
+                label: Text(widget.spotifyConnected ? 'Search Spotify' : 'Add Song'),
+                backgroundColor:
+                    widget.spotifyConnected ? const Color(0xFF1DB954) : null,
+                ),
+            ),
+         children: <Widget>[
+           for (int index = 0; index < songList.length; index += 1)
+             SongTile(
+               key: Key('$index'),
+               song: songList[index],
+               index: index,
+               onLongPress: () => _deleteSong(index),
+             ),
+         ],
+       )     
+     ),
+    );    
   }
 }
 // ---------------------------------------------------------------------------
@@ -716,65 +711,79 @@ class _SongTileState extends State<SongTile> {
   Widget build(BuildContext context) {
     final hasFullPlayback = SpotifyPlayer.instance.isReady && _getTrackUri() != null;
     
-    return GestureDetector(
-      onLongPress: widget.onLongPress,
-      child: ListTile(
-        shape: Border.all(width: 3, color: Colors.white),
-        key: Key('${widget.index}'),
-        tileColor: Colors.lightBlue,
-        hoverColor: Colors.lightBlue,
-        splashColor: Colors.transparent,
-        mouseCursor: SystemMouseCursors.basic,
-        contentPadding: const EdgeInsets.symmetric(vertical: 30, horizontal: 80),
-      leading: Container(
-          width: 100,
-          height: 100,
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.black, width: 2),
-          ),
-          child: widget.song.imageUrl != null
-              ? Image.network(widget.song.imageUrl!, fit: BoxFit.cover)
-              : const Center(child: Text("Album\nCover")),
-      ),
-      title: Container(
-          width: 80,
-          height: 90,
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.black, width: 2),
-          ),
-          child: Center(
-            child: Text(
-              '${widget.song.name}\n${widget.song.artist}\n${widget.song.album}'
-              '${hasFullPlayback ? '\n(Full playback)' : widget.song.previewUrl != null ? '\n(30s preview)' : '\n(No preview)'}',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 11),
-            ),
-          ),
-      ),
-      trailing: SizedBox(
-        width: 56,
-        height: 80,
-        child: FloatingActionButton(
-          onPressed: _togglePlayback,
-          tooltip: hasFullPlayback
-              ? _isPlaying
-                  ? "Pause"
-                  : "Play full song"
-              : widget.song.previewUrl != null
-                  ? _isPlaying
-                      ? "Pause preview"
-                      : "Play 30s preview"
-                  : "Open in Spotify",
-          child: Icon(
-            _isPlaying ? Icons.pause : Icons.play_arrow,
-            size: 40,
-            color: _isCurrentTrack ? Colors.greenAccent : Colors.green,
-          ),
+    return ListTile(
+      shape: Border.all(width: 3, color: Colors.white),
+      key: Key('${widget.index}'),
+      tileColor: Colors.lightBlue,
+      contentPadding: const EdgeInsets.symmetric(vertical: 1, horizontal: 30),
+      // leading: 
+      title: SizedBox(
+        height: 70,
+        width: 500,
+        child:  Row(
+             spacing: 5,
+             mainAxisSize: MainAxisSize.min,
+             children: <Widget>[
+                GestureDetector(
+                  onTap: _openInSpotify,
+                  child: Container(
+                    width: 70,
+                    height: 70,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.black, width: 2),
+                      shape: BoxShape.rectangle
+                    ),
+                    child: widget.song.imageUrl != null
+                      ? Image.network(widget.song.imageUrl!, fit: BoxFit.cover)
+                      : const Center(child: Text("Album\nCover")),
+                  ),
+                ),
+                Flexible(
+                  child: GestureDetector(
+                  onTap: _openInSpotify,
+                  child: Container(
+                    width: 450,
+                    height: 70,
+                    decoration: BoxDecoration(
+                    ),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '${widget.song.name}\n${widget.song.artist}\n${widget.song.album}'
+                        '${hasFullPlayback ? '\n(Full playback)' : widget.song.previewUrl != null ? '\n(30s preview)' : '\n(No preview)'}',
+                        textAlign: TextAlign.justify,
+                        style: const TextStyle(fontSize: 14),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+               ),
+              ),
+               SizedBox(
+                  width: 56,
+                  height: 56,
+                  child: FloatingActionButton(
+                    onPressed: _togglePlayback,
+                    tooltip: hasFullPlayback
+                        ? _isPlaying
+                            ? "Pause"
+                            : "Play full song"
+                        : widget.song.previewUrl != null
+                            ? _isPlaying
+                                ? "Pause preview"
+                                : "Play 30s preview"
+                            : "Open in Spotify",
+                    child: Icon(
+                      _isPlaying ? Icons.pause : Icons.play_arrow,
+                      size: 40,
+                      color: _isCurrentTrack ? Colors.greenAccent : Colors.green,
+                 ),
         ),
       ),
-      onLongPress: null,
-      
-    ),
+             ],
+            ),
+        ),      
+      onLongPress: widget.onLongPress,
     );
   }
 }
