@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -13,20 +14,16 @@ import 'services/spotify_player.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Handle Spotify OAuth redirect (needs Firebase for Firestore token save)
   await SpotifyAuth.handleRedirect();
 
   runApp(const MyApp());
 }
 
-// Handles the login page from Firebase to get into the homepage
-// of the app
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -52,7 +49,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// Displays the playlist on the homepage after successful login
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
 
@@ -75,7 +71,6 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _initialize() async {
-    // Load Spotify tokens now that the user is authenticated
     await SpotifyAuth.loadTokens();
     _spotifyConnected = SpotifyAuth.isConnected;
     if (_spotifyConnected) {
@@ -208,8 +203,7 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Cross-Playlist',
-            style: TextStyle(fontSize: 36)),
+        title: const Text('Cross-Playlist', style: TextStyle(fontSize: 36)),
         automaticallyImplyLeading: false,
         actions: [
           if (_spotifyConnected)
@@ -228,7 +222,7 @@ class _MyHomePageState extends State<MyHomePage> {
               style: TextButton.styleFrom(
                 backgroundColor: const Color(0xFF1DB954),
               ),
-            ),
+            ), 
           const SizedBox(width: 8),
         ],
       ),
@@ -241,8 +235,21 @@ class _MyHomePageState extends State<MyHomePage> {
               children: [
                 Padding(
                   padding: const EdgeInsets.all(16),
-                  child: Text('Playlists',
-                      style: Theme.of(context).textTheme.headlineSmall),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                        'Playlists',
+                        style: Theme.of(context).textTheme.headlineSmall,
+                        overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _createPlaylist,
+                        child: const Text('+ New'),
+                      ),
+                    ],
+                  ),
                 ),
                 const Divider(height: 1),
                 Expanded(
@@ -275,12 +282,6 @@ class _MyHomePageState extends State<MyHomePage> {
                     },
                   ),
                 ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.add),
-                  title: const Text('New Playlist'),
-                  onTap: _createPlaylist,
-                ),
               ],
             ),
           ),
@@ -303,14 +304,13 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 }
 
-// Song class that will handle the playing of music
 class Song {
   const Song(this.artist, this.album, this.genre, this.streamingPlatform,
       {required this.name, required this.url, this.imageUrl, this.previewUrl});
 
   final String name, url, artist, album, genre, streamingPlatform;
   final String? imageUrl;
-  final String? previewUrl; // 30-second preview MP3
+  final String? previewUrl;
 
   Map<String, dynamic> toMap() => {
         'name': name,
@@ -335,7 +335,6 @@ class Song {
       );
 }
 
-// Refreshes Playlist state on adding a song to the playlist
 class Playlist extends StatefulWidget {
   const Playlist(
       {super.key,
@@ -399,7 +398,6 @@ class _PlaylistState extends State<Playlist> {
     _saveSongs();
   }
 
-  /// Opens a search dialog to find songs on Spotify and add them.
   Future<void> _showSpotifySearchDialog() async {
     final song = await showDialog<Song>(
       context: context,
@@ -410,7 +408,6 @@ class _PlaylistState extends State<Playlist> {
     }
   }
 
-  /// Fallback: add a song manually (for when Spotify is not connected).
   void _addManualSong() {
     setState(() {
       songList.add(const Song('Unknown Artist', 'Unknown Album', '', 'Manual',
@@ -422,16 +419,16 @@ class _PlaylistState extends State<Playlist> {
   Widget build(BuildContext context) {
     return Center(
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: 800),
-        child:ReorderableListView(
+        constraints: const BoxConstraints(maxWidth: 800),
+        child: ReorderableListView(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           onReorder: (int oldIndex, int newIndex) {
-                     setState(() {
-                       if (oldIndex < newIndex) newIndex -= 1;
-                       final switchedSong = songList.removeAt(oldIndex);
-                       songList.insert(newIndex, switchedSong);
-                     });
-                   },
+            setState(() {
+              if (oldIndex < newIndex) newIndex -= 1;
+              final switchedSong = songList.removeAt(oldIndex);
+              songList.insert(newIndex, switchedSong);
+            });
+          },
           header: Padding(
             padding: const EdgeInsets.only(bottom: 20),
             child: Center(
@@ -443,26 +440,28 @@ class _PlaylistState extends State<Playlist> {
                     ? 'Search Spotify for a song'
                     : 'Add a song (connect Spotify to search)',
                 icon: Icon(widget.spotifyConnected ? Icons.search : Icons.add),
-                label: Text(widget.spotifyConnected ? 'Search Spotify' : 'Add Song'),
+                label: Text(
+                    widget.spotifyConnected ? 'Search Spotify' : 'Add Song'),
                 backgroundColor:
                     widget.spotifyConnected ? const Color(0xFF1DB954) : null,
-                ),
+              ),
             ),
-            ),
-         children: <Widget>[
-           for (int index = 0; index < songList.length; index += 1)
-             SongTile(
-               key: Key('$index'),
-               song: songList[index],
-               index: index,
-               onLongPress: () => _deleteSong(index),
-             ),
-         ],
-       )     
-     ),
-    );    
+          ),
+          children: <Widget>[
+            for (int index = 0; index < songList.length; index += 1)
+              SongTile(
+                key: Key('$index'),
+                song: songList[index],
+                index: index,
+                onLongPress: () => _deleteSong(index),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }
+
 // ---------------------------------------------------------------------------
 // Spotify Search Dialog
 // ---------------------------------------------------------------------------
@@ -567,7 +566,7 @@ class _SpotifySearchDialogState extends State<SpotifySearchDialog> {
                         final song = Song(
                           track.artist,
                           track.album,
-                          '', // genre (Spotify search doesn't return genre)
+                          '',
                           'Spotify',
                           name: track.name,
                           url: track.spotifyUrl,
@@ -588,9 +587,11 @@ class _SpotifySearchDialogState extends State<SpotifySearchDialog> {
             ],
           ),
         ),
-      ),    );
+      ),
+    );
   }
 }
+
 // ---------------------------------------------------------------------------
 // Song Tile with Audio Playback
 // ---------------------------------------------------------------------------
@@ -600,12 +601,11 @@ class SongTile extends StatefulWidget {
     super.key,
     required this.song,
     required this.index,
-    this.onLongPress
+    this.onLongPress,
   });
   final VoidCallback? onLongPress;
   final Song song;
   final int index;
-
 
   @override
   State<SongTile> createState() => _SongTileState();
@@ -615,78 +615,133 @@ class _SongTileState extends State<SongTile> {
   html.AudioElement? _audioElement;
   bool _isPlaying = false;
   bool _isCurrentTrack = false;
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+  bool _dragging = false;
+  double _dragValue = 0.0;
+  Timer? _ticker;
+
+  String _fmtDuration(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
 
   @override
   void initState() {
     super.initState();
-    // Set up preview player as fallback
+    debugPrint('previewUrl: ${widget.song.previewUrl}');
     if (widget.song.previewUrl != null) {
       _audioElement = html.AudioElement(widget.song.previewUrl!);
+
+      _audioElement!.onLoadedMetadata.listen((_) {
+        if (mounted) {
+          setState(() {
+            _duration = Duration(
+                milliseconds: (_audioElement!.duration * 1000).toInt());
+          });
+        }
+      });
+
+      _audioElement!.onTimeUpdate.listen((_) {
+        if (!_dragging && mounted) {
+          setState(() {
+            _position = Duration(
+                milliseconds: (_audioElement!.currentTime * 1000).toInt());
+          });
+        }
+      });
+
       _audioElement!.onEnded.listen((_) {
         if (mounted) {
-          setState(() => _isPlaying = false);
+          setState(() {
+            _isPlaying = false;
+            _position = Duration.zero;
+          });
+          _ticker?.cancel();
         }
       });
     }
 
-    // Listen to SDK playback state
     SpotifyPlayer.instance.playbackState.listen((state) {
       if (!mounted) return;
+        debugPrint('playbackState fired: $state, isCurrentTrack: $_isCurrentTrack');
       final currentUri = SpotifyPlayer.instance.currentTrackUri;
       final thisTrackUri = _getTrackUri();
-      
+
       setState(() {
         _isCurrentTrack = currentUri == thisTrackUri;
         if (_isCurrentTrack) {
           _isPlaying = state == PlaybackState.playing;
+          if (_isPlaying) {
+            _startTicker();
+          } else {
+            _ticker?.cancel();
+          }
         } else if (_isPlaying && !_isCurrentTrack) {
           _isPlaying = false;
+          _ticker?.cancel();
         }
       });
     });
   }
 
+  void _startTicker() {
+    _ticker?.cancel();
+    _ticker = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!mounted) return;
+      if (!_dragging && _isPlaying && _isCurrentTrack) {
+        setState(() {
+          _position = _position + const Duration(milliseconds: 500);
+          // Cap at duration if we know it
+          if (_duration > Duration.zero && _position > _duration) {
+            _position = _duration;
+            _ticker?.cancel();
+          }
+        });
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _ticker?.cancel();
     _audioElement?.pause();
     _audioElement = null;
     super.dispose();
   }
 
-  /// Extract Spotify track URI from URL (e.g., spotify:track:xxx).
   String? _getTrackUri() {
     final url = widget.song.url;
     if (url.isEmpty) return null;
-    
-    // URL format: https://open.spotify.com/track/TRACK_ID
     final match = RegExp(r'track/([a-zA-Z0-9]+)').firstMatch(url);
-    if (match != null) {
-      return 'spotify:track:${match.group(1)}';
-    }
+    if (match != null) return 'spotify:track:${match.group(1)}';
     return null;
   }
 
   Future<void> _togglePlayback() async {
-    final player = SpotifyPlayer.instance;
-    final trackUri = _getTrackUri();
+  final player = SpotifyPlayer.instance;
+  final trackUri = _getTrackUri();
 
-    // Use SDK if available and song is from Spotify
-    if (player.isReady && trackUri != null) {
-      if (_isCurrentTrack && _isPlaying) {
-        // Pause current track
-        player.pause();
-      } else if (_isCurrentTrack && !_isPlaying) {
-        // Resume current track
-        player.resume();
-      } else {
-        // Play new track
-        await player.playTrack(trackUri);
-      }
-      return;
+  debugPrint('isReady: ${player.isReady}, trackUri: $trackUri, isCurrentTrack: $_isCurrentTrack, isPlaying: $_isPlaying');
+
+  if (player.isReady && trackUri != null) {
+    if (_isCurrentTrack && _isPlaying) {
+      player.pause();
+    } else if (_isCurrentTrack && !_isPlaying) {
+      player.resume();
+    } else {
+      _position = Duration.zero;
+      _duration = const Duration(minutes: 3, seconds: 30);
+      await player.playTrack(trackUri);
     }
+    return;
+  }
+  // ... rest unchanged
 
-    // Fallback to preview
+    // Preview fallback
     if (_audioElement != null) {
+      debugPrint('using audioElement, previewUrl: ${widget.song.previewUrl}');
       setState(() {
         if (_isPlaying) {
           _audioElement!.pause();
@@ -696,10 +751,10 @@ class _SongTileState extends State<SongTile> {
           _isPlaying = true;
         }
       });
-    } else {
-      // No preview or SDK, open in Spotify
-      _openInSpotify();
+      return;
     }
+
+    // Nothing available — do nothing
   }
 
   void _openInSpotify() {
@@ -708,39 +763,45 @@ class _SongTileState extends State<SongTile> {
     }
   }
 
-
   @override
   Widget build(BuildContext context) {
-    final hasFullPlayback = SpotifyPlayer.instance.isReady && _getTrackUri() != null;
-    
+    final hasFullPlayback =
+        SpotifyPlayer.instance.isReady && _getTrackUri() != null;
+    final showScrubber = _isPlaying || _position > Duration.zero;
+    final totalMs = _duration.inMilliseconds.toDouble();
+    final currentMs = _position.inMilliseconds.toDouble();
+
     return ListTile(
       shape: Border.all(width: 3, color: Colors.white),
       key: Key('${widget.index}'),
       tileColor: Colors.lightBlue,
       contentPadding: const EdgeInsets.symmetric(vertical: 1, horizontal: 30),
-      // leading: 
-      title: SizedBox(
-        height: 70,
-        width: 500,
-        child:  Row(
-             spacing: 5,
-             mainAxisSize: MainAxisSize.min,
-             children: <Widget>[
+      title: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            height: 70,
+            width: 500,
+            child: Row(
+              spacing: 5,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
                 SizedBox(
                   width: 30,
                   child: Text(
                     '${widget.index + 1}',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ),
                 Container(
-                    width: 70,
-                    height: 70,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.black, width: 2),
-                      shape: BoxShape.rectangle
-                    ),
-                    child: widget.song.imageUrl != null
+                  width: 70,
+                  height: 70,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.black, width: 2),
+                    shape: BoxShape.rectangle,
+                  ),
+                  child: widget.song.imageUrl != null
                       ? Image.network(widget.song.imageUrl!, fit: BoxFit.cover)
                       : const Center(child: Text("Album\nCover")),
                 ),
@@ -748,8 +809,7 @@ class _SongTileState extends State<SongTile> {
                   child: Container(
                     width: 450,
                     height: 70,
-                    decoration: BoxDecoration(
-                    ),
+                    decoration: const BoxDecoration(),
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
@@ -760,8 +820,8 @@ class _SongTileState extends State<SongTile> {
                       ),
                     ),
                   ),
-              ),
-               SizedBox(
+                ),
+                SizedBox(
                   width: 56,
                   height: 56,
                   child: FloatingActionButton(
@@ -774,17 +834,79 @@ class _SongTileState extends State<SongTile> {
                             ? _isPlaying
                                 ? "Pause preview"
                                 : "Play 30s preview"
-                            : "Open in Spotify",
+                            : "No preview available",
                     child: Icon(
                       _isPlaying ? Icons.pause : Icons.play_arrow,
                       size: 40,
-                      color: _isCurrentTrack ? Colors.greenAccent : Colors.green,
-                 ),
-        ),
-      ),
-             ],
+                      color:
+                          _isCurrentTrack ? Colors.greenAccent : Colors.green,
+                    ),
+                  ),
+                ),
+              ],
             ),
-        ),      
+          ),
+
+          // Scrubber
+          if (showScrubber) ...[
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
+                thumbShape:
+                    const RoundSliderThumbShape(enabledThumbRadius: 6),
+                overlayShape:
+                    const RoundSliderOverlayShape(overlayRadius: 12),
+                activeTrackColor: Colors.white,
+                inactiveTrackColor: Colors.white38,
+                thumbColor: Colors.white,
+                overlayColor: Colors.white24,
+              ),
+              child: Slider(
+                min: 0,
+                max: totalMs > 0 ? totalMs : 1,
+                value: _dragging
+                    ? _dragValue.clamp(0, totalMs > 0 ? totalMs : 1)
+                    : currentMs.clamp(0, totalMs > 0 ? totalMs : 1),
+                onChangeStart: (v) => setState(() {
+                  _dragging = true;
+                  _dragValue = v;
+                }),
+                onChanged: (v) => setState(() => _dragValue = v),
+                onChangeEnd: (v) async {
+                  if (_audioElement != null) {
+                    _audioElement!.currentTime = v / 1000.0;
+                  } else if (_isCurrentTrack && SpotifyPlayer.instance.isReady) {
+                    await SpotifyPlayer.instance.seek(v.toInt());
+                  }
+
+                  setState(() {
+                    _position = Duration(milliseconds: v.toInt());
+                    _dragging = false;
+                  });
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(left: 16, right: 16, bottom: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    _fmtDuration(_dragging
+                        ? Duration(milliseconds: _dragValue.toInt())
+                        : _position),
+                    style: const TextStyle(fontSize: 11, color: Colors.white),
+                  ),
+                  Text(
+                    _fmtDuration(_duration),
+                    style: const TextStyle(fontSize: 11, color: Colors.white),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
       onLongPress: widget.onLongPress,
     );
   }

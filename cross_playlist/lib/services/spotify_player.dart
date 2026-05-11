@@ -19,6 +19,10 @@ class SpotifyPlayer {
   bool _isPlaying = false;
   String? _currentTrackUri;
 
+  // 🔥 ADD THESE (needed for scrubber)
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+
   final _playbackStateController = StreamController<PlaybackState>.broadcast();
   Stream<PlaybackState> get playbackState => _playbackStateController.stream;
 
@@ -26,6 +30,10 @@ class SpotifyPlayer {
   bool get isPlaying => _isPlaying;
   String? get currentTrackUri => _currentTrackUri;
   String? get deviceId => _deviceId;
+
+  // 🔥 ADD THESE GETTERS
+  Duration get position => _position;
+  Duration get duration => _duration;
 
   /// Initialize the Spotify Web Playback SDK.
   Future<void> initialize() async {
@@ -43,7 +51,6 @@ class SpotifyPlayer {
     try {
       debugPrint('SpotifyPlayer: Initializing...');
 
-      // Poll until window.Spotify is set by onSpotifyWebPlaybackSDKReady
       int attempts = 0;
       while (js.context['Spotify'] == null && attempts < 20) {
         await Future.delayed(const Duration(milliseconds: 500));
@@ -55,27 +62,24 @@ class SpotifyPlayer {
         return;
       }
 
-      // Build options as JsObject, jsify() silently drops Dart functions
       final playerOptions = js.JsObject.jsify({
         'name': 'Cross-Playlist Web Player',
         'volume': 0.5,
       });
-      // Spotify SDK calls getOAuthToken(resolve, reject) with 2 args internally.
-      // We accept both but only use the first (the cb we call with the token).
-      playerOptions['getOAuthToken'] = js.allowInterop((dynamic cb, dynamic _) async {
+
+      playerOptions['getOAuthToken'] =
+          js.allowInterop((dynamic cb, dynamic _) async {
         final t = await SpotifyAuth.accessToken;
         (cb as js.JsFunction).apply([t]);
       });
 
-      // Construct new Spotify.Player(playerOptions)
       final spotifyPlayer = js.context['Spotify']['Player'] as js.JsFunction;
       _player = js.JsObject(spotifyPlayer, [playerOptions]);
 
       _setupEventListeners();
 
-      // connect() fires and the 'ready' listener handles the result don't await the promise
       _player!.callMethod('connect', []);
-      debugPrint('SpotifyPlayer: SDK connecting, waiting for ready event...');
+      debugPrint('SpotifyPlayer: SDK connecting...');
     } catch (e) {
       debugPrint('SpotifyPlayer: Initialization error: $e');
     }
@@ -84,6 +88,7 @@ class SpotifyPlayer {
   void _setupEventListeners() {
     final p = _player!;
 
+    // READY
     p.callMethod('addListener', [
       'ready',
       js.allowInterop((js.JsObject data) {
@@ -94,15 +99,17 @@ class SpotifyPlayer {
       }),
     ]);
 
+    // NOT READY
     p.callMethod('addListener', [
       'not_ready',
-      js.allowInterop((js.JsObject data) {
+      js.allowInterop((_) {
         _isReady = false;
         debugPrint('SpotifyPlayer: Device went offline');
         _playbackStateController.add(PlaybackState.notReady);
       }),
     ]);
 
+    // 🔥 STATE CHANGED (THIS POWERS SCRUBBER)
     p.callMethod('addListener', [
       'player_state_changed',
       js.allowInterop((state) {
@@ -111,17 +118,26 @@ class SpotifyPlayer {
 
         _isPlaying = !(s['paused'] as bool);
 
+        // 🔥 ADD THIS (position + duration)
+        final positionMs = s['position'] as num? ?? 0;
+        final durationMs = s['duration'] as num? ?? 0;
+
+        _position = Duration(milliseconds: positionMs.toInt());
+        _duration = Duration(milliseconds: durationMs.toInt());
+
         final trackWindow = s['track_window'] as js.JsObject?;
         final currentTrack = trackWindow?['current_track'] as js.JsObject?;
         if (currentTrack != null) {
           _currentTrackUri = currentTrack['uri'] as String?;
         }
 
-        _playbackStateController
-            .add(_isPlaying ? PlaybackState.playing : PlaybackState.paused);
+        _playbackStateController.add(
+          _isPlaying ? PlaybackState.playing : PlaybackState.paused,
+        );
       }),
     ]);
 
+    // ERRORS
     for (final event in [
       'initialization_error',
       'authentication_error',
@@ -131,14 +147,13 @@ class SpotifyPlayer {
       p.callMethod('addListener', [
         event,
         js.allowInterop((js.JsObject err) {
-          final message = err['message'];
-          debugPrint('SpotifyPlayer [$event]: $message');
+          debugPrint('SpotifyPlayer [$event]: ${err['message']}');
         }),
       ]);
     }
   }
 
-  /// Play a track by Spotify URI (e.g., 'spotify:track:xxxx').
+  /// Play a track
   Future<void> playTrack(String trackUri) async {
     if (!_isReady || _deviceId == null) {
       debugPrint('SpotifyPlayer: Not ready to play');
@@ -149,7 +164,7 @@ class SpotifyPlayer {
     if (token == null) return;
 
     try {
-      debugPrint('SpotifyPlayer: Playing $trackUri on device $_deviceId');
+      debugPrint('SpotifyPlayer: Playing $trackUri');
 
       final response = await http.put(
         Uri.parse(
@@ -162,14 +177,26 @@ class SpotifyPlayer {
       );
 
       if (response.statusCode == 204 || response.statusCode == 202) {
-        debugPrint('SpotifyPlayer: Started playback');
         _currentTrackUri = trackUri;
+        debugPrint('SpotifyPlayer: Playback started');
       } else {
-        debugPrint(
-            'SpotifyPlayer: Play failed (${response.statusCode}): ${response.body}');
+        debugPrint('SpotifyPlayer: Play failed ${response.statusCode}');
       }
     } catch (e) {
       debugPrint('SpotifyPlayer: Play error: $e');
+    }
+  }
+
+  // 🔥 THIS IS THE MISSING PIECE FOR SCRUBBING
+  Future<void> seek(int positionMs) async {
+    if (_player == null || !_isReady) return;
+
+    try {
+      _player!.callMethod('seek', [positionMs]);
+      _position = Duration(milliseconds: positionMs);
+      debugPrint('SpotifyPlayer: Seek -> $positionMs ms');
+    } catch (e) {
+      debugPrint('SpotifyPlayer: Seek error: $e');
     }
   }
 
@@ -189,6 +216,8 @@ class SpotifyPlayer {
     _isReady = false;
     _deviceId = null;
     _player = null;
+    _position = Duration.zero;
+    _duration = Duration.zero;
   }
 }
 
