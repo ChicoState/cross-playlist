@@ -69,6 +69,8 @@ class SpotifyAuth {
       'response_type': 'code',
       'redirect_uri': _redirectUri,
       'scope': _scopes.join(' '),
+      // Force consent so users with older grants pick up newly added scopes.
+      'show_dialog': 'true',
       'code_challenge_method': 'S256',
       'code_challenge': challenge,
     });
