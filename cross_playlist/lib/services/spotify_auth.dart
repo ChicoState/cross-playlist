@@ -35,19 +35,22 @@ class SpotifyAuth {
   /// Get access token, automatically refreshing if expired.
   static Future<String?> get accessToken async {
     if (_accessToken == null) return null;
-    
+
     // Check if token is expired or about to expire (within 5 minutes)
-    if (_expiresAt != null && 
-        DateTime.now().isAfter(_expiresAt!.subtract(const Duration(minutes: 5)))) {
+    if (_expiresAt != null &&
+        DateTime.now().isAfter(
+          _expiresAt!.subtract(const Duration(minutes: 5)),
+        )) {
       await _refreshAccessToken();
     }
-    
+
     return _accessToken;
   }
 
   // PKCE helpers
   static String _codeVerifier() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+    const chars =
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
     final rng = Random.secure();
     return List.generate(128, (_) => chars[rng.nextInt(chars.length)]).join();
   }
@@ -123,7 +126,9 @@ class SpotifyAuth {
         debugPrint('Spotify: Connected!');
         return true;
       } else {
-        debugPrint('Spotify: Token failed (${response.statusCode}): ${response.body}');
+        debugPrint(
+          'Spotify: Token failed (${response.statusCode}): ${response.body}',
+        );
         return false;
       }
     } catch (e) {
@@ -162,14 +167,14 @@ class SpotifyAuth {
       final data = doc.data()!;
       _accessToken = data['access_token'] as String?;
       _refreshToken = data['refresh_token'] as String?;
-      
+
       final expiresAtMs = data['expires_at'] as int?;
-      _expiresAt = expiresAtMs != null 
+      _expiresAt = expiresAtMs != null
           ? DateTime.fromMillisecondsSinceEpoch(expiresAtMs)
           : null;
 
       debugPrint('Spotify: Loaded tokens from Firestore');
-      
+
       // If token is expired, try to refresh immediately
       if (_expiresAt != null && DateTime.now().isAfter(_expiresAt!)) {
         await _refreshAccessToken();
@@ -191,11 +196,11 @@ class SpotifyAuth {
           .collection('private')
           .doc('spotify')
           .set({
-        'access_token': _accessToken,
-        'refresh_token': _refreshToken,
-        'expires_at': _expiresAt?.millisecondsSinceEpoch,
-        'updated_at': FieldValue.serverTimestamp(),
-      });
+            'access_token': _accessToken,
+            'refresh_token': _refreshToken,
+            'expires_at': _expiresAt?.millisecondsSinceEpoch,
+            'updated_at': FieldValue.serverTimestamp(),
+          });
       debugPrint('Spotify: Saved tokens to Firestore');
     } catch (e) {
       debugPrint('Spotify: Error saving tokens: $e');
@@ -229,7 +234,7 @@ class SpotifyAuth {
 
     try {
       debugPrint('Spotify: Refreshing access token...');
-      
+
       final response = await http.post(
         Uri.parse('https://accounts.spotify.com/api/token'),
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -243,12 +248,12 @@ class SpotifyAuth {
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body) as Map<String, dynamic>;
         _accessToken = body['access_token'] as String;
-        
+
         // Spotify may return a new refresh token
         if (body.containsKey('refresh_token')) {
           _refreshToken = body['refresh_token'] as String;
         }
-        
+
         final expiresIn = body['expires_in'] as int;
         _expiresAt = DateTime.now().add(Duration(seconds: expiresIn));
 
@@ -258,7 +263,9 @@ class SpotifyAuth {
         debugPrint('Spotify: Token refreshed successfully');
         return true;
       } else {
-        debugPrint('Spotify: Refresh failed (${response.statusCode}): ${response.body}');
+        debugPrint(
+          'Spotify: Refresh failed (${response.statusCode}): ${response.body}',
+        );
         // If refresh fails, clear everything
         await logout();
         return false;

@@ -27,8 +27,9 @@ class SpotifyTrack {
 
   factory SpotifyTrack.fromJson(Map<String, dynamic> json) {
     final artists = json['artists'] as List<dynamic>;
-    final artistName =
-        artists.isNotEmpty ? artists[0]['name'] as String : 'Unknown Artist';
+    final artistName = artists.isNotEmpty
+        ? artists[0]['name'] as String
+        : 'Unknown Artist';
 
     final albumJson = json['album'] as Map<String, dynamic>;
     final albumName = albumJson['name'] as String? ?? 'Unknown Album';
@@ -88,8 +89,10 @@ class SpotifyApi {
 
   /// Search for tracks matching [query].
   /// Returns an empty list if not connected or the request fails.
-  static Future<List<SpotifyTrack>> searchTracks(String query,
-      {int limit = 10}) async {
+  static Future<List<SpotifyTrack>> searchTracks(
+    String query, {
+    int limit = 10,
+  }) async {
     final token = await SpotifyAuth.accessToken;
     if (token == null) {
       debugPrint('SpotifyApi: Not connected – cannot search');
@@ -97,11 +100,13 @@ class SpotifyApi {
     }
 
     try {
-      final url = Uri.parse('$_baseUrl/search').replace(queryParameters: {
-        'q': query,
-        'type': 'track',
-        'limit': limit.toString(),
-      });
+      final url = Uri.parse('$_baseUrl/search').replace(
+        queryParameters: {
+          'q': query,
+          'type': 'track',
+          'limit': limit.toString(),
+        },
+      );
 
       final response = await http.get(
         url,
@@ -113,13 +118,13 @@ class SpotifyApi {
         final tracks = body['tracks'] as Map<String, dynamic>;
         final items = tracks['items'] as List<dynamic>;
         return items
-            .map((item) =>
-                SpotifyTrack.fromJson(item as Map<String, dynamic>))
+            .map((item) => SpotifyTrack.fromJson(item as Map<String, dynamic>))
             .toList();
       } else {
         debugPrint(
-            'SpotifyApi: Search failed (${response.statusCode}): '
-            '${response.body}');
+          'SpotifyApi: Search failed (${response.statusCode}): '
+          '${response.body}',
+        );
         return [];
       }
     } catch (e) {
@@ -134,9 +139,9 @@ class SpotifyApi {
     if (token == null) return [];
 
     try {
-      final url = Uri.parse('$_baseUrl/me/playlists').replace(queryParameters: {
-        'limit': '50',
-      });
+      final url = Uri.parse(
+        '$_baseUrl/me/playlists',
+      ).replace(queryParameters: {'limit': '50'});
       final response = await http.get(
         url,
         headers: {'Authorization': 'Bearer $token'},
@@ -146,12 +151,16 @@ class SpotifyApi {
         final body = jsonDecode(response.body) as Map<String, dynamic>;
         final items = body['items'] as List<dynamic>;
         return items
-            .map((item) =>
-                SpotifyPlaylistMeta.fromJson(item as Map<String, dynamic>))
+            .map(
+              (item) =>
+                  SpotifyPlaylistMeta.fromJson(item as Map<String, dynamic>),
+            )
             .toList();
       } else {
-        debugPrint('SpotifyApi: getUserPlaylists failed '
-            '(${response.statusCode}): ${response.body}');
+        debugPrint(
+          'SpotifyApi: getUserPlaylists failed '
+          '(${response.statusCode}): ${response.body}',
+        );
         return [];
       }
     } catch (e) {
@@ -169,10 +178,8 @@ class SpotifyApi {
 
     // First try the modern playlist items endpoint.
     String? nextUrl = Uri.parse('$_baseUrl/playlists/$playlistId/items')
-        .replace(queryParameters: {
-      'limit': '50',
-      'market': 'from_token',
-    }).toString();
+        .replace(queryParameters: {'limit': '50', 'market': 'from_token'})
+        .toString();
 
     try {
       while (nextUrl != null) {
@@ -187,16 +194,20 @@ class SpotifyApi {
 
         if (response.statusCode == 403) {
           final authHeader = response.headers['www-authenticate'];
-          debugPrint('SpotifyApi: getPlaylistTracks 403 on items endpoint, '
-              'trying full playlist endpoint... body=${response.body} '
-              'www-authenticate=$authHeader');
+          debugPrint(
+            'SpotifyApi: getPlaylistTracks 403 on items endpoint, '
+            'trying full playlist endpoint... body=${response.body} '
+            'www-authenticate=$authHeader',
+          );
           // Fallback: fetch the full playlist object
           return _getPlaylistTracksFallback(playlistId);
         }
 
         if (response.statusCode != 200) {
-          debugPrint('SpotifyApi: getPlaylistTracks failed '
-              '(${response.statusCode}): ${response.body}');
+          debugPrint(
+            'SpotifyApi: getPlaylistTracks failed '
+            '(${response.statusCode}): ${response.body}',
+          );
           break;
         }
 
@@ -220,7 +231,8 @@ class SpotifyApi {
   /// Fallback: fetch tracks via GET /playlists/{id} which returns the
   /// first page of tracks embedded in the response.
   static Future<List<SpotifyTrack>> _getPlaylistTracksFallback(
-      String playlistId) async {
+    String playlistId,
+  ) async {
     final List<SpotifyTrack> allTracks = [];
     try {
       final token = await SpotifyAuth.accessToken;
@@ -242,9 +254,11 @@ class SpotifyApi {
 
       if (response.statusCode != 200) {
         final authHeader = response.headers['www-authenticate'];
-        debugPrint('SpotifyApi: playlist fallback failed '
-            '(${response.statusCode}): ${response.body} '
-            'www-authenticate=$authHeader');
+        debugPrint(
+          'SpotifyApi: playlist fallback failed '
+          '(${response.statusCode}): ${response.body} '
+          'www-authenticate=$authHeader',
+        );
         return [];
       }
 
@@ -270,8 +284,10 @@ class SpotifyApi {
           headers: {'Authorization': 'Bearer $t'},
         );
         if (resp.statusCode != 200) {
-          debugPrint('SpotifyApi: playlist fallback pagination failed '
-              '(${resp.statusCode}): ${resp.body}');
+          debugPrint(
+            'SpotifyApi: playlist fallback pagination failed '
+            '(${resp.statusCode}): ${resp.body}',
+          );
           break;
         }
         final b = jsonDecode(resp.body) as Map<String, dynamic>;

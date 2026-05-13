@@ -1,26 +1,36 @@
 import 'dart:async';
-import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'dart:html' as html;
 import 'firebase_options.dart';
 import 'login_page.dart';
 import 'services/playlist_service.dart';
 import 'services/spotify_auth.dart';
 import 'services/spotify_api.dart';
 import 'services/spotify_player.dart';
+import 'services/youtube_api.dart';
+import 'services/youtube_web_player.dart';
+import 'song.dart';
+import 'playback_controller.dart';
+import 'mini_player_bar.dart';
+import 'youtube_search_dialog.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   await SpotifyAuth.handleRedirect();
+
+  // Register the HtmlElementView factory for the YouTube iframe host.
+  // The view is mounted later (see MyHomePage) and the JS YT.Player
+  // attaches to it on first play.
+  if (kIsWeb) {
+    YoutubeWebPlayer.instance.registerViewFactory();
+  }
 
   runApp(const MyApp());
 }
@@ -30,7 +40,7 @@ void main() async {
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
-  static _MyAppState? of(BuildContext context) =>
+  static _MyAppState? _of(BuildContext context) =>
       context.findAncestorStateOfType<_MyAppState>();
 
   @override
@@ -101,6 +111,13 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _loadingPlaylists = true;
   final Set<int> _selectedSongIndices = {};
   final GlobalKey<_PlaylistState> _playlistKey = GlobalKey<_PlaylistState>();
+  final PlaylistPlaybackController _playback = PlaylistPlaybackController();
+
+  @override
+  void dispose() {
+    _playback.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -133,8 +150,9 @@ class _MyHomePageState extends State<MyHomePage> {
         _playlists = [p];
       }
       _selectedPlaylistId ??= _playlists.first.id;
-      _selectedPlaylistName =
-          _playlists.firstWhere((p) => p.id == _selectedPlaylistId).name;
+      _selectedPlaylistName = _playlists
+          .firstWhere((p) => p.id == _selectedPlaylistId)
+          .name;
     } catch (e) {
       debugPrint('Error loading playlists: $e');
     }
@@ -162,8 +180,11 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _renamePlaylist(PlaylistMeta playlist) async {
-    final name = await _showTextDialog('Rename Playlist', 'Enter new name',
-        initialValue: playlist.name);
+    final name = await _showTextDialog(
+      'Rename Playlist',
+      'Enter new name',
+      initialValue: playlist.name,
+    );
     if (name == null || name.trim().isEmpty) return;
     await PlaylistService.renamePlaylist(playlist.id, name.trim());
     setState(() {
@@ -191,12 +212,13 @@ class _MyHomePageState extends State<MyHomePage> {
         content: Text('Delete "${playlist.name}"? This cannot be undone.'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child:
-                  const Text('Delete', style: TextStyle(color: Colors.red))),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );
@@ -211,8 +233,11 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  Future<String?> _showTextDialog(String title, String hint,
-      {String? initialValue}) {
+  Future<String?> _showTextDialog(
+    String title,
+    String hint, {
+    String? initialValue,
+  }) {
     final controller = TextEditingController(text: initialValue);
     return showDialog<String>(
       context: context,
@@ -221,17 +246,21 @@ class _MyHomePageState extends State<MyHomePage> {
         content: TextField(
           controller: controller,
           decoration: InputDecoration(
-              hintText: hint, border: const OutlineInputBorder()),
+            hintText: hint,
+            border: const OutlineInputBorder(),
+          ),
           autofocus: true,
           onSubmitted: (_) => Navigator.pop(ctx, controller.text),
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, controller.text),
-              child: const Text('OK')),
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('OK'),
+          ),
         ],
       ),
     );
@@ -244,7 +273,8 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<void> _deleteSelectedSongs() async {
     final ps = _playlistKey.currentState;
     if (ps == null) return;
-    final sorted = _selectedSongIndices.toList()..sort((a, b) => b.compareTo(a));
+    final sorted = _selectedSongIndices.toList()
+      ..sort((a, b) => b.compareTo(a));
     for (final i in sorted) {
       ps.songList.removeAt(i);
     }
@@ -254,7 +284,9 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _moveOrCopySelected({required bool copy}) async {
-    final others = _playlists.where((p) => p.id != _selectedPlaylistId).toList();
+    final others = _playlists
+        .where((p) => p.id != _selectedPlaylistId)
+        .toList();
     if (others.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No other playlists to choose from')),
@@ -266,18 +298,19 @@ class _MyHomePageState extends State<MyHomePage> {
       builder: (ctx) => SimpleDialog(
         title: Text(copy ? 'Copy to playlist' : 'Move to playlist'),
         children: others
-            .map((p) => SimpleDialogOption(
-                  onPressed: () => Navigator.pop(ctx, p),
-                  child: Text(p.name),
-                ))
+            .map(
+              (p) => SimpleDialogOption(
+                onPressed: () => Navigator.pop(ctx, p),
+                child: Text(p.name),
+              ),
+            )
             .toList(),
       ),
     );
     if (target == null) return;
     final ps = _playlistKey.currentState;
     if (ps == null) return;
-    final songs = _selectedSongIndices.toList()
-      ..sort();
+    final songs = _selectedSongIndices.toList()..sort();
     final selectedSongs = songs.map((i) => ps.songList[i]).toList();
     // Add to target playlist
     try {
@@ -288,7 +321,8 @@ class _MyHomePageState extends State<MyHomePage> {
       debugPrint('Error copying songs: $e');
     }
     if (!copy) {
-      final sorted = _selectedSongIndices.toList()..sort((a, b) => b.compareTo(a));
+      final sorted = _selectedSongIndices.toList()
+        ..sort((a, b) => b.compareTo(a));
       for (final i in sorted) {
         ps.songList.removeAt(i);
       }
@@ -298,7 +332,11 @@ class _MyHomePageState extends State<MyHomePage> {
     _clearSelection();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${copy ? "Copied" : "Moved"} ${selectedSongs.length} song(s) to ${target.name}')),
+        SnackBar(
+          content: Text(
+            '${copy ? "Copied" : "Moved"} ${selectedSongs.length} song(s) to ${target.name}',
+          ),
+        ),
       );
     }
   }
@@ -319,16 +357,27 @@ class _MyHomePageState extends State<MyHomePage> {
       builder: (ctx) => SimpleDialog(
         title: const Text('Import from Spotify'),
         children: spotifyPlaylists
-            .map((sp) => SimpleDialogOption(
-                  onPressed: () => Navigator.pop(ctx, sp),
-                  child: ListTile(
-                    leading: sp.imageUrl != null
-                        ? Image.network(sp.imageUrl!, width: 40, height: 40, fit: BoxFit.cover)
-                        : const Icon(Icons.music_note),
-                    title: Text(sp.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    contentPadding: EdgeInsets.zero,
+            .map(
+              (sp) => SimpleDialogOption(
+                onPressed: () => Navigator.pop(ctx, sp),
+                child: ListTile(
+                  leading: sp.imageUrl != null
+                      ? Image.network(
+                          sp.imageUrl!,
+                          width: 40,
+                          height: 40,
+                          fit: BoxFit.cover,
+                        )
+                      : const Icon(Icons.music_note),
+                  title: Text(
+                    sp.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ))
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            )
             .toList(),
       ),
     );
@@ -337,7 +386,10 @@ class _MyHomePageState extends State<MyHomePage> {
     if (!mounted) return;
     // Show loading indicator
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Importing playlist...'), duration: Duration(seconds: 30)),
+      const SnackBar(
+        content: Text('Importing playlist...'),
+        duration: Duration(seconds: 30),
+      ),
     );
 
     final tracks = await SpotifyApi.getPlaylistTracks(picked.id);
@@ -347,23 +399,29 @@ class _MyHomePageState extends State<MyHomePage> {
 
     if (tracks.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No tracks found — try disconnecting and reconnecting Spotify')),
+        const SnackBar(
+          content: Text(
+            'No tracks found — try disconnecting and reconnecting Spotify',
+          ),
+        ),
       );
       return;
     }
 
     final newPlaylist = await PlaylistService.createPlaylist(picked.name);
     final songMaps = tracks
-        .map((t) => Song(
-              t.artist,
-              t.album,
-              '',
-              'Spotify',
-              name: t.name,
-              url: t.spotifyUrl,
-              imageUrl: t.imageUrl,
-              previewUrl: t.previewUrl,
-            ).toMap())
+        .map(
+          (t) => Song(
+            t.artist,
+            t.album,
+            '',
+            'Spotify',
+            name: t.name,
+            url: t.spotifyUrl,
+            imageUrl: t.imageUrl,
+            previewUrl: t.previewUrl,
+          ).toMap(),
+        )
         .toList();
     await PlaylistService.saveSongs(newPlaylist.id, songMaps);
 
@@ -376,18 +434,22 @@ class _MyHomePageState extends State<MyHomePage> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Imported "${picked.name}" with ${tracks.length} tracks')),
+        SnackBar(
+          content: Text(
+            'Imported "${picked.name}" with ${tracks.length} tracks',
+          ),
+        ),
       );
     }
   }
+
   @override
   Widget build(BuildContext context) {
-    final appState = MyApp.of(context);
+    final appState = MyApp._of(context);
     final hasSelection = _selectedSongIndices.isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(
-<<<<<<< HEAD
         scrolledUnderElevation: 0,
         title: hasSelection
             ? Text('${_selectedSongIndices.length} selected')
@@ -421,15 +483,19 @@ class _MyHomePageState extends State<MyHomePage> {
               TextButton.icon(
                 onPressed: _disconnectSpotify,
                 icon: const Icon(Icons.check_circle, color: Color(0xFF1DB954)),
-                label: const Text('Spotify Connected',
-                    style: TextStyle(color: Color(0xFF1DB954))),
+                label: const Text(
+                  'Spotify Connected',
+                  style: TextStyle(color: Color(0xFF1DB954)),
+                ),
               )
             else
               TextButton.icon(
                 onPressed: _connectSpotify,
                 icon: const Icon(Icons.link, color: Colors.white),
-                label: const Text('Connect Spotify',
-                    style: TextStyle(color: Colors.white)),
+                label: const Text(
+                  'Connect Spotify',
+                  style: TextStyle(color: Colors.white),
+                ),
                 style: TextButton.styleFrom(
                   backgroundColor: const Color(0xFF1DB954),
                 ),
@@ -437,234 +503,188 @@ class _MyHomePageState extends State<MyHomePage> {
             const SizedBox(width: 8),
             Row(
               children: [
-                Icon(appState!.isDark ? Icons.dark_mode : Icons.light_mode, size: 18),
-                Switch(
-                  value: appState.isDark,
-                  onChanged: appState.toggleTheme,
+                Icon(
+                  appState!.isDark ? Icons.dark_mode : Icons.light_mode,
+                  size: 18,
                 ),
+                Switch(value: appState.isDark, onChanged: appState.toggleTheme),
               ],
             ),
             const SizedBox(width: 8),
           ],
-=======
-        title: const Text('Cross-Playlist', style: TextStyle(fontSize: 36)),
-        automaticallyImplyLeading: false,
-        actions: [
-          if (_spotifyConnected)
-            TextButton.icon(
-              onPressed: _disconnectSpotify,
-              icon: const Icon(Icons.check_circle, color: Color(0xFF1DB954)),
-              label: const Text('Spotify Connected',
-                  style: TextStyle(color: Color(0xFF1DB954))),
-            )
-          else
-            TextButton.icon(
-              onPressed: _connectSpotify,
-              icon: const Icon(Icons.link, color: Colors.white),
-              label: const Text('Connect Spotify',
-                  style: TextStyle(color: Colors.white)),
-              style: TextButton.styleFrom(
-                backgroundColor: const Color(0xFF1DB954),
-              ),
-            ), 
-          const SizedBox(width: 8),
->>>>>>> 72605e9d336d31dc4a053981d2f859d8550c66d5
         ],
       ),
-      body: Row(
+      body: Stack(
         children: [
-          SizedBox(
-            width: 250,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-<<<<<<< HEAD
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Playlists',
-                          style: Theme.of(context).textTheme.titleMedium),
-                      IconButton(
-                        icon: const Icon(Icons.add, size: 22),
-                        tooltip: 'New Playlist',
-                        onPressed: _createPlaylist,
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: ListView(
-                    children: [
-                      if (_spotifyConnected)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                          child: ElevatedButton.icon(
-                            onPressed: _importSpotifyPlaylist,
-                            icon: const Icon(Icons.download, color: Colors.white),
-                            label: const Text(
-                              'Import from Spotify',
-                              style: TextStyle(color: Colors.white),
+          Column(
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 250,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
                             ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF1DB954),
-                              foregroundColor: Colors.white,
-                              minimumSize: const Size.fromHeight(42),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Playlists',
+                                  style: Theme.of(context).textTheme.titleMedium,
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.add, size: 22),
+                                  tooltip: 'New Playlist',
+                                  onPressed: _createPlaylist,
+                                ),
+                              ],
                             ),
                           ),
-                        ),
-                      for (final p in _playlists)
-                        ListTile(
-                          title: Text(p.name),
-                          selected: p.id == _selectedPlaylistId,
-                          onTap: () {
-                            setState(() {
-                              _selectedPlaylistId = p.id;
-                              _selectedPlaylistName = p.name;
-                              _selectedSongIndices.clear();
-                            });
-                          },
-                          trailing: PopupMenuButton<String>(
-                            onSelected: (value) {
-                              if (value == 'rename') _renamePlaylist(p);
-                              if (value == 'delete') _deletePlaylist(p);
-                            },
-                            itemBuilder: (_) => [
-                              const PopupMenuItem(
-                                  value: 'rename', child: Text('Rename')),
-                              const PopupMenuItem(
-                                  value: 'delete', child: Text('Delete')),
-                            ],
+                          const Divider(height: 1),
+                          Expanded(
+                            child: ListView(
+                              children: [
+                                if (_spotifyConnected)
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      8,
+                                      16,
+                                      8,
+                                    ),
+                                    child: ElevatedButton.icon(
+                                      onPressed: _importSpotifyPlaylist,
+                                      icon: const Icon(
+                                        Icons.download,
+                                        color: Colors.white,
+                                      ),
+                                      label: const Text(
+                                        'Import from Spotify',
+                                        style: TextStyle(color: Colors.white),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFF1DB954),
+                                        foregroundColor: Colors.white,
+                                        minimumSize: const Size.fromHeight(42),
+                                      ),
+                                    ),
+                                  ),
+                                for (final p in _playlists)
+                                  ListTile(
+                                    title: Text(p.name),
+                                    selected: p.id == _selectedPlaylistId,
+                                    onTap: () {
+                                      setState(() {
+                                        _selectedPlaylistId = p.id;
+                                        _selectedPlaylistName = p.name;
+                                        _selectedSongIndices.clear();
+                                      });
+                                    },
+                                    trailing: PopupMenuButton<String>(
+                                      onSelected: (value) {
+                                        if (value == 'rename') _renamePlaylist(p);
+                                        if (value == 'delete') _deletePlaylist(p);
+                                      },
+                                      itemBuilder: (_) => [
+                                        const PopupMenuItem(
+                                          value: 'rename',
+                                          child: Text('Rename'),
+                                        ),
+                                        const PopupMenuItem(
+                                          value: 'delete',
+                                          child: Text('Delete'),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                    ],
-                  ),
-                ),
-=======
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                        'Playlists',
-                        style: Theme.of(context).textTheme.headlineSmall,
-                        overflow: TextOverflow.ellipsis,
-                        ),
+                        ],
                       ),
-                      TextButton(
-                        onPressed: _createPlaylist,
-                        child: const Text('+ New'),
-                      ),
-                    ],
+                    ),
+                    const VerticalDivider(width: 1),
+                    Expanded(
+                      child: _loadingPlaylists
+                          ? const Center(child: CircularProgressIndicator())
+                          : _selectedPlaylistId != null
+                          ? Playlist(
+                              key: _playlistKey,
+                              spotifyConnected: _spotifyConnected,
+                              playlistId: _selectedPlaylistId!,
+                              playlistName: _selectedPlaylistName,
+                              selectedIndices: _selectedSongIndices,
+                              playbackController: _playback,
+                              onSelectionChanged: (indices) {
+                                setState(() {
+                                  _selectedSongIndices.clear();
+                                  _selectedSongIndices.addAll(indices);
+                                });
+                              },
+                            )
+                          : const Center(child: Text('No playlist selected')),
+                    ),
+                  ],
+                ),
+              ),
+              MiniPlayerBar(controller: _playback),
+            ],
+          ),
+          // Persistent host for the YouTube IFrame player. Must stay
+          // mounted (even when no song is playing) so the JS YT.Player
+          // can attach to its host <div>. We keep it tiny and nearly
+          // transparent in the corner, but inside the viewport — YouTube
+          // refuses to play audio when the iframe is offscreen or
+          // zero-sized.
+          if (kIsWeb)
+            Positioned(
+              right: 0,
+              bottom: 0,
+              width: 2,
+              height: 2,
+              child: IgnorePointer(
+                child: Opacity(
+                  opacity: 0.01,
+                  child: OverflowBox(
+                    minWidth: 320,
+                    maxWidth: 320,
+                    minHeight: 180,
+                    maxHeight: 180,
+                    child: const HtmlElementView(
+                      viewType: YoutubeWebPlayer.viewType,
+                    ),
                   ),
                 ),
-                const Divider(height: 1),
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: _playlists.length,
-                    itemBuilder: (context, index) {
-                      final p = _playlists[index];
-                      return ListTile(
-                        title: Text(p.name),
-                        selected: p.id == _selectedPlaylistId,
-                        onTap: () {
-                          setState(() {
-                            _selectedPlaylistId = p.id;
-                            _selectedPlaylistName = p.name;
-                          });
-                        },
-                        trailing: PopupMenuButton<String>(
-                          onSelected: (value) {
-                            if (value == 'rename') _renamePlaylist(p);
-                            if (value == 'delete') _deletePlaylist(p);
-                          },
-                          itemBuilder: (_) => [
-                            const PopupMenuItem(
-                                value: 'rename', child: Text('Rename')),
-                            const PopupMenuItem(
-                                value: 'delete', child: Text('Delete')),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
->>>>>>> 72605e9d336d31dc4a053981d2f859d8550c66d5
-              ],
+              ),
             ),
-          ),
-          const VerticalDivider(width: 1),
-          Expanded(
-            child: _loadingPlaylists
-                ? const Center(child: CircularProgressIndicator())
-                : _selectedPlaylistId != null
-                    ? Playlist(
-                        key: _playlistKey,
-                        spotifyConnected: _spotifyConnected,
-                        playlistId: _selectedPlaylistId!,
-                        playlistName: _selectedPlaylistName,
-                        selectedIndices: _selectedSongIndices,
-                        onSelectionChanged: (indices) {
-                          setState(() {
-                            _selectedSongIndices.clear();
-                            _selectedSongIndices.addAll(indices);
-                          });
-                        },
-                      )
-                    : const Center(child: Text('No playlist selected')),
-          ),
         ],
       ),
     );
   }
 }
 
-class Song {
-  const Song(this.artist, this.album, this.genre, this.streamingPlatform,
-      {required this.name, required this.url, this.imageUrl, this.previewUrl});
-
-  final String name, url, artist, album, genre, streamingPlatform;
-  final String? imageUrl;
-  final String? previewUrl;
-
-  Map<String, dynamic> toMap() => {
-        'name': name,
-        'artist': artist,
-        'album': album,
-        'genre': genre,
-        'streamingPlatform': streamingPlatform,
-        'url': url,
-        'imageUrl': imageUrl,
-        'previewUrl': previewUrl,
-      };
-
-  factory Song.fromMap(Map<String, dynamic> map) => Song(
-        map['artist'] as String? ?? '',
-        map['album'] as String? ?? '',
-        map['genre'] as String? ?? '',
-        map['streamingPlatform'] as String? ?? '',
-        name: map['name'] as String? ?? '',
-        url: map['url'] as String? ?? '',
-        imageUrl: map['imageUrl'] as String?,
-        previewUrl: map['previewUrl'] as String?,
-      );
-}
-
 class Playlist extends StatefulWidget {
-  const Playlist(
-      {super.key,
-      required this.spotifyConnected,
-      required this.playlistId,
-      required this.playlistName,
-      required this.selectedIndices,
-      required this.onSelectionChanged});
+  const Playlist({
+    super.key,
+    required this.spotifyConnected,
+    required this.playlistId,
+    required this.playlistName,
+    required this.selectedIndices,
+    required this.playbackController,
+    required this.onSelectionChanged,
+  });
 
   final bool spotifyConnected;
   final String playlistId;
   final String playlistName;
   final Set<int> selectedIndices;
+  final PlaylistPlaybackController playbackController;
   final ValueChanged<Set<int>> onSelectionChanged;
 
   @override
@@ -678,12 +698,14 @@ class _PlaylistState extends State<Playlist> {
   @override
   void initState() {
     super.initState();
+    widget.playbackController.attach(widget.playlistId, () => songList);
     _loadSongs();
   }
 
   @override
   void didUpdateWidget(covariant Playlist oldWidget) {
     super.didUpdateWidget(oldWidget);
+    widget.playbackController.attach(widget.playlistId, () => songList);
     if (oldWidget.playlistId != widget.playlistId) {
       _loading = true;
       songList.clear();
@@ -732,6 +754,59 @@ class _PlaylistState extends State<Playlist> {
     _saveSongs();
   }
 
+  Future<void> _showYoutubeSearchDialog() async {
+    final song = await showDialog<Song>(
+      context: context,
+      builder: (context) => const YoutubeSearchDialog(),
+    );
+    if (song != null) {
+      _addSong(song);
+    }
+  }
+
+  Future<void> _showAddSongSheet() async {
+    final canSpotify = widget.spotifyConnected;
+    final canYoutube = YoutubeApi.isConfigured;
+    if (!canSpotify && !canYoutube) {
+      _addManualSong();
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (canSpotify)
+                ListTile(
+                  leading: const Icon(Icons.search, color: Color(0xFF1DB954)),
+                  title: const Text('Search Spotify'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showSpotifySearchDialog();
+                  },
+                ),
+              if (canYoutube)
+                ListTile(
+                  leading: const Icon(
+                    Icons.ondemand_video,
+                    color: Color(0xFFFF0000),
+                  ),
+                  title: const Text('Search YouTube'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showYoutubeSearchDialog();
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _showSpotifySearchDialog() async {
     final song = await showDialog<Song>(
       context: context,
@@ -744,8 +819,17 @@ class _PlaylistState extends State<Playlist> {
 
   void _addManualSong() {
     setState(() {
-      songList.add(const Song('Unknown Artist', 'Unknown Album', '', 'Manual',
-          name: 'New Song', url: '', previewUrl: null));
+      songList.add(
+        const Song(
+          'Unknown Artist',
+          'Unknown Album',
+          '',
+          'Manual',
+          name: 'New Song',
+          url: '',
+          previewUrl: null,
+        ),
+      );
     });
   }
 
@@ -772,26 +856,29 @@ class _PlaylistState extends State<Playlist> {
               final switchedSong = songList.removeAt(oldIndex);
               songList.insert(newIndex, switchedSong);
             });
-<<<<<<< HEAD
             _saveSongs();
-=======
->>>>>>> 72605e9d336d31dc4a053981d2f859d8550c66d5
           },
           header: Padding(
             padding: const EdgeInsets.only(bottom: 20),
             child: Center(
               child: FloatingActionButton.extended(
-                onPressed: widget.spotifyConnected
-                    ? _showSpotifySearchDialog
+                onPressed: (widget.spotifyConnected || YoutubeApi.isConfigured)
+                    ? _showAddSongSheet
                     : _addManualSong,
-                tooltip: widget.spotifyConnected
-                    ? 'Search Spotify for a song'
-                    : 'Add a song (connect Spotify to search)',
-                icon: Icon(widget.spotifyConnected ? Icons.search : Icons.add),
+                tooltip: (widget.spotifyConnected || YoutubeApi.isConfigured)
+                    ? 'Add songs from Spotify or YouTube'
+                    : 'Add a blank row (connect Spotify or add a YouTube Data API key in youtube_api.dart to search)',
+                icon: const Icon(Icons.library_add),
                 label: Text(
-                    widget.spotifyConnected ? 'Search Spotify' : 'Add Song'),
-                backgroundColor:
-                    widget.spotifyConnected ? const Color(0xFF1DB954) : null,
+                  (widget.spotifyConnected || YoutubeApi.isConfigured)
+                      ? 'Add songs'
+                      : 'Add Song',
+                ),
+                backgroundColor: widget.spotifyConnected
+                    ? const Color(0xFF1DB954)
+                    : (YoutubeApi.isConfigured
+                          ? const Color(0xFFFF0000)
+                          : null),
               ),
             ),
           ),
@@ -801,11 +888,9 @@ class _PlaylistState extends State<Playlist> {
                 key: Key('$index'),
                 song: songList[index],
                 index: index,
-<<<<<<< HEAD
                 selected: widget.selectedIndices.contains(index),
+                playback: widget.playbackController,
                 onSelected: () => _toggleSelection(index),
-=======
->>>>>>> 72605e9d336d31dc4a053981d2f859d8550c66d5
                 onLongPress: () => _deleteSong(index),
               ),
           ],
@@ -891,8 +976,10 @@ class _SpotifySearchDialogState extends State<SpotifySearchDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Search Spotify',
-                  style: Theme.of(context).textTheme.headlineSmall),
+              Text(
+                'Search Spotify',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
               const SizedBox(height: 12),
               TextField(
                 controller: _searchController,
@@ -908,9 +995,12 @@ class _SpotifySearchDialogState extends State<SpotifySearchDialog> {
               if (_error != null)
                 Padding(
                   padding: const EdgeInsets.all(8),
-                  child: Text(_error!,
-                      style: TextStyle(
-                          color: Theme.of(context).colorScheme.error)),
+                  child: Text(
+                    _error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
                 ),
               Flexible(
                 child: ListView.builder(
@@ -920,13 +1010,23 @@ class _SpotifySearchDialogState extends State<SpotifySearchDialog> {
                     final track = _results[index];
                     return ListTile(
                       leading: track.imageUrl != null
-                          ? Image.network(track.imageUrl!,
-                              width: 48, height: 48, fit: BoxFit.cover)
+                          ? Image.network(
+                              track.imageUrl!,
+                              width: 48,
+                              height: 48,
+                              fit: BoxFit.cover,
+                            )
                           : const Icon(Icons.music_note, size: 48),
-                      title: Text(track.name,
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
-                      subtitle: Text('${track.artist} • ${track.album}',
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      title: Text(
+                        track.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        '${track.artist} • ${track.album}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       onTap: () {
                         final song = Song(
                           track.artist,
@@ -966,11 +1066,9 @@ class SongTile extends StatefulWidget {
     super.key,
     required this.song,
     required this.index,
-<<<<<<< HEAD
     required this.selected,
+    required this.playback,
     required this.onSelected,
-=======
->>>>>>> 72605e9d336d31dc4a053981d2f859d8550c66d5
     this.onLongPress,
   });
   final VoidCallback? onLongPress;
@@ -978,37 +1076,21 @@ class SongTile extends StatefulWidget {
   final bool selected;
   final Song song;
   final int index;
+  final PlaylistPlaybackController playback;
 
   @override
   State<SongTile> createState() => _SongTileState();
 }
 
-class _SongTileState extends State<SongTile> with SingleTickerProviderStateMixin {
-  html.AudioElement? _audioElement;
-  bool _isPlaying = false;
-  bool _isCurrentTrack = false;
-<<<<<<< HEAD
+class _SongTileState extends State<SongTile>
+    with SingleTickerProviderStateMixin {
   bool _isHovered = false;
   late AnimationController _longPressController;
   bool _longPressing = false;
-=======
-  Duration _position = Duration.zero;
-  Duration _duration = Duration.zero;
-  bool _dragging = false;
-  double _dragValue = 0.0;
-  Timer? _ticker;
-
-  String _fmtDuration(Duration d) {
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
->>>>>>> 72605e9d336d31dc4a053981d2f859d8550c66d5
 
   @override
   void initState() {
     super.initState();
-<<<<<<< HEAD
     _longPressController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -1020,404 +1102,170 @@ class _SongTileState extends State<SongTile> with SingleTickerProviderStateMixin
         _longPressController.reset();
       }
     });
-    // Set up preview player as fallback
-=======
-    debugPrint('previewUrl: ${widget.song.previewUrl}');
->>>>>>> 72605e9d336d31dc4a053981d2f859d8550c66d5
-    if (widget.song.previewUrl != null) {
-      _audioElement = html.AudioElement(widget.song.previewUrl!);
-
-      _audioElement!.onLoadedMetadata.listen((_) {
-        if (mounted) {
-          setState(() {
-            _duration = Duration(
-                milliseconds: (_audioElement!.duration * 1000).toInt());
-          });
-        }
-      });
-
-      _audioElement!.onTimeUpdate.listen((_) {
-        if (!_dragging && mounted) {
-          setState(() {
-            _position = Duration(
-                milliseconds: (_audioElement!.currentTime * 1000).toInt());
-          });
-        }
-      });
-
-      _audioElement!.onEnded.listen((_) {
-        if (mounted) {
-          setState(() {
-            _isPlaying = false;
-            _position = Duration.zero;
-          });
-          _ticker?.cancel();
-        }
-      });
-    }
-
-    SpotifyPlayer.instance.playbackState.listen((state) {
-      if (!mounted) return;
-        debugPrint('playbackState fired: $state, isCurrentTrack: $_isCurrentTrack');
-      final currentUri = SpotifyPlayer.instance.currentTrackUri;
-      final thisTrackUri = _getTrackUri();
-
-      setState(() {
-        _isCurrentTrack = currentUri == thisTrackUri;
-        if (_isCurrentTrack) {
-          _isPlaying = state == PlaybackState.playing;
-          if (_isPlaying) {
-            _startTicker();
-          } else {
-            _ticker?.cancel();
-          }
-        } else if (_isPlaying && !_isCurrentTrack) {
-          _isPlaying = false;
-          _ticker?.cancel();
-        }
-      });
-    });
-  }
-
-  void _startTicker() {
-    _ticker?.cancel();
-    _ticker = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (!mounted) return;
-      if (!_dragging && _isPlaying && _isCurrentTrack) {
-        setState(() {
-          _position = _position + const Duration(milliseconds: 500);
-          // Cap at duration if we know it
-          if (_duration > Duration.zero && _position > _duration) {
-            _position = _duration;
-            _ticker?.cancel();
-          }
-        });
-      }
-    });
   }
 
   @override
   void dispose() {
-<<<<<<< HEAD
     _longPressController.dispose();
-=======
-    _ticker?.cancel();
->>>>>>> 72605e9d336d31dc4a053981d2f859d8550c66d5
-    _audioElement?.pause();
-    _audioElement = null;
     super.dispose();
   }
 
-  String? _getTrackUri() {
-    final url = widget.song.url;
-    if (url.isEmpty) return null;
-    final match = RegExp(r'track/([a-zA-Z0-9]+)').firstMatch(url);
-    if (match != null) return 'spotify:track:${match.group(1)}';
-    return null;
-  }
-
   Future<void> _togglePlayback() async {
-  final player = SpotifyPlayer.instance;
-  final trackUri = _getTrackUri();
-
-  debugPrint('isReady: ${player.isReady}, trackUri: $trackUri, isCurrentTrack: $_isCurrentTrack, isPlaying: $_isPlaying');
-
-  if (player.isReady && trackUri != null) {
-    if (_isCurrentTrack && _isPlaying) {
-      player.pause();
-    } else if (_isCurrentTrack && !_isPlaying) {
-      player.resume();
-    } else {
-      _position = Duration.zero;
-      _duration = const Duration(minutes: 3, seconds: 30);
-      await player.playTrack(trackUri);
-    }
-    return;
-  }
-  // ... rest unchanged
-
-    // Preview fallback
-    if (_audioElement != null) {
-      debugPrint('using audioElement, previewUrl: ${widget.song.previewUrl}');
-      setState(() {
-        if (_isPlaying) {
-          _audioElement!.pause();
-          _isPlaying = false;
-        } else {
-          _audioElement!.play();
-          _isPlaying = true;
-        }
-      });
-      return;
-    }
-
-    // Nothing available — do nothing
+    await widget.playback.togglePlayPauseForIndex(widget.index);
   }
 
-  void _openInSpotify() {
-    if (widget.song.url.isNotEmpty) {
-      html.window.open(widget.song.url, '_blank');
-    }
-  }
+  bool get _isCurrent =>
+      widget.playback.isCurrentIndex(widget.index) &&
+      widget.playback.showMiniPlayer;
+
+  bool get _isPlaying => _isCurrent && widget.playback.isPlaying;
 
   @override
   Widget build(BuildContext context) {
-<<<<<<< HEAD
-    final hasFullPlayback = SpotifyPlayer.instance.isReady && _getTrackUri() != null;
-    
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: GestureDetector(
-        onLongPressStart: (_) {
-          _longPressing = true;
-          _longPressController.forward(from: 0);
-        },
-        onLongPressEnd: (_) {
-          _longPressing = false;
-          _longPressController.reset();
-        },
-        onLongPressCancel: () {
-          _longPressing = false;
-          _longPressController.reset();
-        },
-        child: AnimatedBuilder(
-          animation: _longPressController,
-          builder: (context, child) {
-            final progress = _longPressController.value;
-            return Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: progress > 0
-                    ? Colors.red.withValues(alpha: progress * 0.3)
-                    : null,
-              ),
-              child: child,
-            );
-          },
-          child: ListTile(
-          shape: RoundedRectangleBorder(
-            side: _isHovered
-                ? const BorderSide(width: 1.5, color: Colors.grey)
-                : BorderSide.none,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          key: Key('${widget.index}'),
-          tileColor: widget.selected
-              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.12)
-              : Theme.of(context).scaffoldBackgroundColor,
-          contentPadding: const EdgeInsets.symmetric(vertical: 1, horizontal: 16),
-          title: SizedBox(
-=======
-    final hasFullPlayback =
-        SpotifyPlayer.instance.isReady && _getTrackUri() != null;
-    final showScrubber = _isPlaying || _position > Duration.zero;
-    final totalMs = _duration.inMilliseconds.toDouble();
-    final currentMs = _position.inMilliseconds.toDouble();
+    return ListenableBuilder(
+      listenable: widget.playback,
+      builder: (context, _) {
+        final canSpotifyFull =
+            SpotifyPlayer.instance.isReady &&
+            spotifyTrackUriFromUrl(widget.song.url) != null;
+        final canYoutube = YoutubeApi.videoIdForSong(widget.song) != null;
+        final hasPreview =
+            widget.song.previewUrl != null &&
+            widget.song.previewUrl!.isNotEmpty;
 
-    return ListTile(
-      shape: Border.all(width: 3, color: Colors.white),
-      key: Key('${widget.index}'),
-      tileColor: Colors.lightBlue,
-      contentPadding: const EdgeInsets.symmetric(vertical: 1, horizontal: 30),
-      title: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
->>>>>>> 72605e9d336d31dc4a053981d2f859d8550c66d5
-            height: 70,
-            width: 500,
-            child: Row(
-              spacing: 5,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                SizedBox(
-<<<<<<< HEAD
-                  width: 40,
-                  child: _isHovered || widget.selected
-                      ? Checkbox(
-                          value: widget.selected,
-                          onChanged: (_) => widget.onSelected(),
-                        )
-                      : Center(
-                          child: Text(
-                            '${widget.index + 1}',
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        return MouseRegion(
+          onEnter: (_) => setState(() => _isHovered = true),
+          onExit: (_) => setState(() => _isHovered = false),
+          child: GestureDetector(
+            onLongPressStart: (_) {
+              _longPressing = true;
+              _longPressController.forward(from: 0);
+            },
+            onLongPressEnd: (_) {
+              _longPressing = false;
+              _longPressController.reset();
+            },
+            onLongPressCancel: () {
+              _longPressing = false;
+              _longPressController.reset();
+            },
+            child: AnimatedBuilder(
+              animation: _longPressController,
+              builder: (context, child) {
+                final progress = _longPressController.value;
+                return Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    color: progress > 0
+                        ? Colors.red.withValues(alpha: progress * 0.3)
+                        : null,
+                  ),
+                  child: child,
+                );
+              },
+              child: ListTile(
+                shape: RoundedRectangleBorder(
+                  side: _isHovered
+                      ? const BorderSide(width: 1.5, color: Colors.grey)
+                      : BorderSide.none,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                key: Key('${widget.index}'),
+                tileColor: widget.selected
+                    ? Theme.of(
+                        context,
+                      ).colorScheme.primary.withValues(alpha: 0.12)
+                    : Theme.of(context).scaffoldBackgroundColor,
+                contentPadding: const EdgeInsets.symmetric(
+                  vertical: 1,
+                  horizontal: 16,
+                ),
+                title: SizedBox(
+                  height: 70,
+                  width: 500,
+                  child: Row(
+                    spacing: 5,
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      SizedBox(
+                        width: 40,
+                        child: _isHovered || widget.selected
+                            ? Checkbox(
+                                value: widget.selected,
+                                onChanged: (_) => widget.onSelected(),
+                              )
+                            : Center(
+                                child: Text(
+                                  '${widget.index + 1}',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                      ),
+                      Container(
+                        width: 70,
+                        height: 70,
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.black, width: 2),
+                          shape: BoxShape.rectangle,
+                        ),
+                        child: widget.song.imageUrl != null
+                            ? Image.network(
+                                widget.song.imageUrl!,
+                                fit: BoxFit.cover,
+                              )
+                            : const Center(child: Text("Album\nCover")),
+                      ),
+                      Flexible(
+                        child: SizedBox(
+                          width: 450,
+                          height: 70,
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '${widget.song.name}\n${widget.song.artist}\n${widget.song.album}',
+                              textAlign: TextAlign.justify,
+                              style: const TextStyle(fontSize: 14),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ),
-                ),
-              Container(
-                width: 70,
-                height: 70,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.black, width: 2),
-                  shape: BoxShape.rectangle,
-                ),
-                child: widget.song.imageUrl != null
-                    ? Image.network(widget.song.imageUrl!, fit: BoxFit.cover)
-                    : const Center(child: Text("Album\nCover")),
-              ),
-              Flexible(
-                child: Container(
-                  width: 450,
-                  height: 70,
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '${widget.song.name}\n${widget.song.artist}\n${widget.song.album}',
-                      textAlign: TextAlign.justify,
-                      style: const TextStyle(fontSize: 14),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-              ),
-              IconButton(
-                onPressed: _togglePlayback,
-                iconSize: 36,
-                tooltip: hasFullPlayback
-                    ? _isPlaying
-                        ? "Pause"
-                        : "Play full song"
-                    : widget.song.previewUrl != null
-                        ? _isPlaying
-                            ? "Pause preview"
-                            : "Play 30s preview"
-                        : "Open in Spotify",
-                icon: Icon(
-                  _isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                  color: _isCurrentTrack ? const Color(0xFF1DB954) : Colors.green,
-                ),
-              ),
-            ],
-          ),
-        ),
-        ),
-      ),
-      ),
-=======
-                  width: 30,
-                  child: Text(
-                    '${widget.index + 1}',
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                Container(
-                  width: 70,
-                  height: 70,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.black, width: 2),
-                    shape: BoxShape.rectangle,
-                  ),
-                  child: widget.song.imageUrl != null
-                      ? Image.network(widget.song.imageUrl!, fit: BoxFit.cover)
-                      : const Center(child: Text("Album\nCover")),
-                ),
-                Flexible(
-                  child: Container(
-                    width: 450,
-                    height: 70,
-                    decoration: const BoxDecoration(),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '${widget.song.name}\n${widget.song.artist}\n${widget.song.album}',
-                        textAlign: TextAlign.justify,
-                        style: const TextStyle(fontSize: 14),
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 56,
-                  height: 56,
-                  child: FloatingActionButton(
-                    onPressed: _togglePlayback,
-                    tooltip: hasFullPlayback
-                        ? _isPlaying
-                            ? "Pause"
-                            : "Play full song"
-                        : widget.song.previewUrl != null
+                      IconButton(
+                        onPressed: _togglePlayback,
+                        iconSize: 36,
+                        tooltip: canSpotifyFull
                             ? _isPlaying
-                                ? "Pause preview"
-                                : "Play 30s preview"
-                            : "No preview available",
-                    child: Icon(
-                      _isPlaying ? Icons.pause : Icons.play_arrow,
-                      size: 40,
-                      color:
-                          _isCurrentTrack ? Colors.greenAccent : Colors.green,
-                    ),
+                                  ? 'Pause'
+                                  : 'Play full song (Spotify)'
+                            : canYoutube
+                            ? _isPlaying
+                                  ? 'Pause'
+                                  : 'Play on YouTube'
+                            : hasPreview
+                            ? _isPlaying
+                                  ? 'Pause preview'
+                                  : 'Play 30s preview'
+                            : 'No playback for this row',
+                        icon: Icon(
+                          _isPlaying
+                              ? Icons.pause_circle_filled
+                              : Icons.play_circle_filled,
+                          color: _isCurrent
+                              ? const Color(0xFF1DB954)
+                              : Colors.green,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
           ),
-
-          // Scrubber
-          if (showScrubber) ...[
-            SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 3,
-                thumbShape:
-                    const RoundSliderThumbShape(enabledThumbRadius: 6),
-                overlayShape:
-                    const RoundSliderOverlayShape(overlayRadius: 12),
-                activeTrackColor: Colors.white,
-                inactiveTrackColor: Colors.white38,
-                thumbColor: Colors.white,
-                overlayColor: Colors.white24,
-              ),
-              child: Slider(
-                min: 0,
-                max: totalMs > 0 ? totalMs : 1,
-                value: _dragging
-                    ? _dragValue.clamp(0, totalMs > 0 ? totalMs : 1)
-                    : currentMs.clamp(0, totalMs > 0 ? totalMs : 1),
-                onChangeStart: (v) => setState(() {
-                  _dragging = true;
-                  _dragValue = v;
-                }),
-                onChanged: (v) => setState(() => _dragValue = v),
-                onChangeEnd: (v) async {
-                  if (_audioElement != null) {
-                    _audioElement!.currentTime = v / 1000.0;
-                  } else if (_isCurrentTrack && SpotifyPlayer.instance.isReady) {
-                    await SpotifyPlayer.instance.seek(v.toInt());
-                  }
-
-                  setState(() {
-                    _position = Duration(milliseconds: v.toInt());
-                    _dragging = false;
-                  });
-                },
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.only(left: 16, right: 16, bottom: 6),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    _fmtDuration(_dragging
-                        ? Duration(milliseconds: _dragValue.toInt())
-                        : _position),
-                    style: const TextStyle(fontSize: 11, color: Colors.white),
-                  ),
-                  Text(
-                    _fmtDuration(_duration),
-                    style: const TextStyle(fontSize: 11, color: Colors.white),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-      onLongPress: widget.onLongPress,
->>>>>>> 72605e9d336d31dc4a053981d2f859d8550c66d5
+        );
+      },
     );
   }
 }

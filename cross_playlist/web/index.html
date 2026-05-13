@@ -38,6 +38,16 @@
   </script>
   <!-- Spotify Web Playback SDK -->
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
+
+  <!-- YouTube IFrame Player API. The API calls window.onYouTubeIframeAPIReady
+       once YT is fully loaded; we set a flag the Dart side can poll. -->
+  <script>
+    window.__ytIframeApiReady = false;
+    window.onYouTubeIframeAPIReady = function () {
+      window.__ytIframeApiReady = true;
+    };
+  </script>
+  <script src="https://www.youtube.com/iframe_api"></script>
 </head>
 <body>
   <!--
