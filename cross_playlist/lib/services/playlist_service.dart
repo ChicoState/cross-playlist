@@ -21,10 +21,12 @@ class PlaylistService {
   static Future<List<PlaylistMeta>> getPlaylists() async {
     final snap = await _ref().orderBy('createdAt').get();
     return snap.docs
-        .map((d) => PlaylistMeta(
-              id: d.id,
-              name: d.data()['name'] as String? ?? 'Untitled',
-            ))
+        .map(
+          (d) => PlaylistMeta(
+            id: d.id,
+            name: d.data()['name'] as String? ?? 'Untitled',
+          ),
+        )
         .toList();
   }
 
@@ -54,7 +56,9 @@ class PlaylistService {
   }
 
   static Future<void> saveSongs(
-      String playlistId, List<Map<String, dynamic>> songs) async {
+    String playlistId,
+    List<Map<String, dynamic>> songs,
+  ) async {
     await _ref().doc(playlistId).update({'songs': songs});
   }
 }

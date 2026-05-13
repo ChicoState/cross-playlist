@@ -67,8 +67,10 @@ class SpotifyPlayer {
         'volume': 0.5,
       });
 
-      playerOptions['getOAuthToken'] =
-          js.allowInterop((dynamic cb, dynamic _) async {
+      playerOptions['getOAuthToken'] = js.allowInterop((
+        dynamic cb,
+        dynamic _,
+      ) async {
         final t = await SpotifyAuth.accessToken;
         (cb as js.JsFunction).apply([t]);
       });
@@ -168,7 +170,8 @@ class SpotifyPlayer {
 
       final response = await http.put(
         Uri.parse(
-            'https://api.spotify.com/v1/me/player/play?device_id=$_deviceId'),
+          'https://api.spotify.com/v1/me/player/play?device_id=$_deviceId',
+        ),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
