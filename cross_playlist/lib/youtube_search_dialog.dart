@@ -25,7 +25,7 @@ class _YoutubeSearchDialogState extends State<YoutubeSearchDialog> {
     _searchController.addListener(_onSearchChanged);
     if (!YoutubeApi.isConfigured) {
       _error =
-          'YouTube search needs a Data API key. Paste it into _youtubeDataApiKey in lib/services/youtube_api.dart (same pattern as the Spotify client id in spotify_auth.dart).';
+          'YouTube search needs a Data API key. Pass it at run/build time via --dart-define=YOUTUBE_DATA_API_KEY=... (or --dart-define-from-file=secrets.json).';
     }
   }
 

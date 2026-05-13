@@ -5,7 +5,9 @@ import 'package:http/http.dart' as http;
 
 import '../song.dart';
 
-const String _youtubeDataApiKey = 'AIzaSyCQQQeVOfmjmlCba5VpDDauToS0qos4itE';
+const String _youtubeDataApiKey = String.fromEnvironment(
+  'YOUTUBE_DATA_API_KEY',
+);
 
 /// One row from YouTube search.
 class YoutubeSearchVideo {
@@ -79,11 +81,6 @@ class YoutubeApi {
     final q = query.trim();
     if (q.isEmpty) return [];
 
-    // search.list only supports part=snippet. Asking for `status` here
-    // makes YouTube return HTTP 400, so we filter via a second
-    // videos.list call below. `videoEmbeddable=true` lets YouTube also
-    // pre-filter on its side – not 100% reliable (region/age gating
-    // still slips through), but it cuts down on bad hits.
     final uri = Uri.https('www.googleapis.com', '/youtube/v3/search', {
       'part': 'snippet',
       'type': 'video',
